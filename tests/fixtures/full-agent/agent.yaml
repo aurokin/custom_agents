@@ -1,0 +1,36 @@
+name: frontend-reviewer
+description: Reviews frontend code, UX regressions, and performance.
+defaults:
+  sandbox: workspace-write
+  skills:
+    - web-design-guidelines
+    - plan-reviewer
+claude:
+  model: sonnet
+  tools:
+    - Read
+    - Grep
+    - Glob
+  disallowed_tools:
+    - Write
+  permission_mode: default
+  max_turns: 12
+  effort: high
+  mcp_servers:
+    - github
+  background: true
+codex:
+  model: gpt-5.4
+  model_reasoning_effort: high
+  nickname_candidates:
+    - Atlas
+    - Echo
+  mcp_servers:
+    github:
+      command: npx
+      args:
+        - -y
+        - "@modelcontextprotocol/server-github"
+  skills_config:
+    - name: web-design-guidelines
+      enabled: false
