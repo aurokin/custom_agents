@@ -1,6 +1,6 @@
-# Custom Subagents
+# Custom Agents
 
-`custom_subagents` is a small Python CLI for generating consumer-native agent
+`custom_agents` is a small Python CLI for generating consumer-native agent
 definitions for Claude Code and Codex from a shared canonical source under
 `~/.agents/`.
 
