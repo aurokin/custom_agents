@@ -9,7 +9,7 @@ from .discover import DiscoveryError, discover_agents, resolve_agents_home
 from .generators.claude import write_claude_agent
 from .generators.codex import write_codex_agent
 from .linker import prune_stale_links, sync_links
-from .manifest import Manifest, load_manifest, save_manifest
+from .manifest import Manifest, load_manifest, remove_legacy_manifest, save_manifest
 from .schema import AgentDefinition
 
 
@@ -96,7 +96,11 @@ def _cmd_sync(agents_home: Path, dry_run: bool) -> int:
     removed = _remove_stale_generated_files(manifest, desired, dry_run=dry_run)
     summary.removed = removed
 
-    link_summary, link_messages = sync_links(agents_home, dry_run=dry_run)
+    link_summary, link_messages, linked_targets = sync_links(
+        agents_home,
+        managed_links=manifest.linked_targets,
+        dry_run=dry_run,
+    )
     for message in link_messages:
         print(message)
 
@@ -107,9 +111,11 @@ def _cmd_sync(agents_home: Path, dry_run: bool) -> int:
                 generated_files={
                     "claude": desired["claude"],
                     "codex": desired["codex"],
-                }
+                },
+                linked_targets=linked_targets,
             ),
         )
+        remove_legacy_manifest(agents_home)
 
     print(
         "sync:"
@@ -146,14 +152,18 @@ def _cmd_clean(agents_home: Path, dry_run: bool) -> int:
     manifest = load_manifest(agents_home)
     desired = {"claude": [], "codex": []}
     removed = _remove_stale_generated_files(manifest, desired, dry_run=dry_run, remove_all=True)
-    link_summary, link_messages = prune_stale_links(agents_home, dry_run=dry_run)
+    link_summary, link_messages = prune_stale_links(
+        manifest.linked_targets,
+        dry_run=dry_run,
+    )
     for message in link_messages:
-        if message.startswith("remove stale"):
+        if message.startswith("remove managed") or message.startswith("warn"):
             print(message)
     if not dry_run:
         save_manifest(agents_home, Manifest.empty())
+        remove_legacy_manifest(agents_home)
     print(
-        f"clean: removed={removed} stale-links={link_summary.removed} "
+        f"clean: removed={removed} managed-links={link_summary.removed} "
         f"warned={link_summary.warned}"
     )
     return 0

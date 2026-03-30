@@ -20,58 +20,80 @@ class LinkSummary:
         self.removed += other.removed
 
 
-def sync_links(agents_home: Path, dry_run: bool = False) -> tuple[LinkSummary, list[str]]:
+def sync_links(
+    agents_home: Path,
+    managed_links: dict[str, str] | None = None,
+    dry_run: bool = False,
+) -> tuple[LinkSummary, list[str], dict[str, str]]:
     summary = LinkSummary()
     messages: list[str] = []
-    home = Path.home()
-
-    claude_dir = home / ".claude"
-    codex_dir = home / ".codex"
-    skill_targets = [claude_dir / "skills", codex_dir / "skills"]
-    for directory in [claude_dir, codex_dir, *skill_targets]:
+    desired_links = build_desired_links(agents_home)
+    parent_dirs = sorted({target.parent for _, target in desired_links})
+    for directory in parent_dirs:
         if not dry_run:
             directory.mkdir(parents=True, exist_ok=True)
 
-    source_agents_md = agents_home / "AGENTS.md"
-    if source_agents_md.exists():
-        for target in [claude_dir / "CLAUDE.md", codex_dir / "AGENTS.md"]:
-            outcome = _ensure_symlink(source_agents_md, target, dry_run)
-            summary.merge(outcome[0])
-            messages.extend(outcome[1])
+    for source, target in desired_links:
+        outcome = _ensure_symlink(source, target, dry_run)
+        summary.merge(outcome[0])
+        messages.extend(outcome[1])
 
-    skills_dir = agents_home / "skills"
-    if skills_dir.exists():
-        for source_skill in sorted(
-            path for path in skills_dir.iterdir() if path.is_dir()
-        ):
-            for target_dir in skill_targets:
-                outcome = _ensure_symlink(
-                    source_skill, target_dir / source_skill.name, dry_run
-                )
-                summary.merge(outcome[0])
-                messages.extend(outcome[1])
-
-    stale_summary, stale_messages = prune_stale_links(agents_home, dry_run=dry_run)
+    stale_summary, stale_messages = prune_stale_links(
+        managed_links or {},
+        desired_targets={str(target): str(source) for source, target in desired_links},
+        dry_run=dry_run,
+    )
     summary.merge(stale_summary)
     messages.extend(stale_messages)
 
-    return summary, messages
+    return (
+        summary,
+        messages,
+        {str(target): str(source) for source, target in desired_links},
+    )
 
 
-def prune_stale_links(agents_home: Path, dry_run: bool = False) -> tuple[LinkSummary, list[str]]:
-    summary = LinkSummary()
-    messages: list[str] = []
+def build_desired_links(agents_home: Path) -> list[tuple[Path, Path]]:
     home = Path.home()
     claude_dir = home / ".claude"
     codex_dir = home / ".codex"
-    skill_targets = [claude_dir / "skills", codex_dir / "skills"]
+    desired: list[tuple[Path, Path]] = []
 
-    for target in [claude_dir / "CLAUDE.md", codex_dir / "AGENTS.md"]:
-        result = _remove_stale_symlink(target, dry_run)
-        summary.merge(result[0])
-        messages.extend(result[1])
-    for target_dir in skill_targets:
-        result = _remove_stale_symlinks_in_dir(target_dir, dry_run)
+    source_agents_md = agents_home / "AGENTS.md"
+    if source_agents_md.exists():
+        desired.extend(
+            [
+                (source_agents_md, claude_dir / "CLAUDE.md"),
+                (source_agents_md, codex_dir / "AGENTS.md"),
+            ]
+        )
+
+    skills_dir = agents_home / "skills"
+    if skills_dir.exists():
+        for source_skill in sorted(path for path in skills_dir.iterdir() if path.is_dir()):
+            desired.extend(
+                [
+                    (source_skill, claude_dir / "skills" / source_skill.name),
+                    (source_skill, codex_dir / "skills" / source_skill.name),
+                ]
+            )
+
+    return desired
+
+
+def prune_stale_links(
+    managed_links: dict[str, str],
+    desired_targets: dict[str, str] | None = None,
+    dry_run: bool = False,
+) -> tuple[LinkSummary, list[str]]:
+    summary = LinkSummary()
+    messages: list[str] = []
+    desired_targets = desired_targets or {}
+
+    for target_str, source_str in managed_links.items():
+        if target_str in desired_targets:
+            continue
+        result = _remove_owned_symlink(Path(target_str), Path(source_str), dry_run)
         summary.merge(result[0])
         messages.extend(result[1])
 
@@ -106,28 +128,27 @@ def _ensure_symlink(source: Path, target: Path, dry_run: bool) -> tuple[LinkSumm
     return summary, messages
 
 
-def _remove_stale_symlink(path: Path, dry_run: bool) -> tuple[LinkSummary, list[str]]:
-    summary = LinkSummary()
-    messages: list[str] = []
-    if path.is_symlink() and not path.exists():
-        if not dry_run:
-            path.unlink()
-        summary.removed += 1
-        messages.append(f"remove stale {path}")
-    return summary, messages
-
-
-def _remove_stale_symlinks_in_dir(
-    directory: Path, dry_run: bool
+def _remove_owned_symlink(
+    path: Path, expected_source: Path, dry_run: bool
 ) -> tuple[LinkSummary, list[str]]:
     summary = LinkSummary()
     messages: list[str] = []
-    if not directory.exists():
+    if not path.exists() and not path.is_symlink():
         return summary, messages
-    for path in sorted(directory.iterdir()):
-        if path.is_symlink() and not path.exists():
-            if not dry_run:
-                path.unlink()
-            summary.removed += 1
-            messages.append(f"remove stale {path}")
+    if not path.is_symlink():
+        summary.warned += 1
+        messages.append(f"warn {path} exists and is not a symlink")
+        return summary, messages
+    current_target = path.resolve(strict=False)
+    if current_target != expected_source.resolve(strict=False):
+        summary.warned += 1
+        messages.append(
+            f"warn {path} points to {current_target} instead of {expected_source}"
+        )
+        return summary, messages
+    if path.is_symlink():
+        if not dry_run:
+            path.unlink()
+        summary.removed += 1
+        messages.append(f"remove managed {path}")
     return summary, messages
