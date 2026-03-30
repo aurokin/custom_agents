@@ -1,0 +1,21 @@
+name: retrorabbit_code_reviewer
+description: Reviews code hunks for correctness, risk, and maintainability.
+defaults:
+  sandbox: read-only
+claude:
+  model: sonnet
+  tools:
+    - Read
+    - Grep
+    - Glob
+  disallowed_tools:
+    - Write
+  permission_mode: default
+  max_turns: 16
+  effort: high
+codex:
+  model: gpt-5.4
+  model_reasoning_effort: high
+  nickname_candidates:
+    - RetroRabbit
+    - Rabbit Reviewer

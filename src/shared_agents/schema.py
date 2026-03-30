@@ -8,7 +8,7 @@ from typing import Any
 import yaml
 
 
-NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 SHARED_SANDBOX_VALUES = {"read-only", "workspace-write", "full-access"}
 CLAUDE_PERMISSION_VALUES = {
     "default",
@@ -291,7 +291,7 @@ def _optional_dict_list(
 def _validate_name(name: str, path: Path) -> None:
     if not NAME_RE.fullmatch(name):
         raise SchemaError(
-            f"Invalid name in {path}: {name!r}. Use lowercase letters, digits, and hyphens."
+            f"Invalid name in {path}: {name!r}. Use lowercase letters, digits, hyphens, and underscores."
         )
 
 
@@ -359,4 +359,3 @@ def _validate_codex_config(config: dict[str, Any], path: Path) -> None:
         raise SchemaError(
             f"codex.config in {path} contains fields handled elsewhere: {keys}"
         )
-

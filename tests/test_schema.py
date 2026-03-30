@@ -97,3 +97,37 @@ def test_schema_unknown_codex_keys_fail(agents_home: Path) -> None:
 
     with pytest.raises(SchemaError, match="Unknown codex keys"):
         load_agent_definition(source_dir)
+
+
+def test_schema_allows_underscore_agent_name(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "underscore-agent",
+        "\n".join(
+            [
+                "name: retrorabbit_code_reviewer",
+                "description: Reviews hunks for correctness",
+                "codex:",
+                "  nickname_candidates:",
+                "    - RetroRabbit",
+            ]
+        ),
+    )
+
+    agent = load_agent_definition(source_dir)
+
+    assert agent.name == "retrorabbit_code_reviewer"
+
+
+def test_repo_retrorabbit_code_reviewer_definition() -> None:
+    source_dir = Path(__file__).resolve().parents[1] / "agents" / "retrorabbit_code_reviewer"
+
+    agent = load_agent_definition(source_dir)
+
+    assert agent.name == "retrorabbit_code_reviewer"
+    assert agent.description == "Reviews code hunks for correctness, risk, and maintainability."
+    assert agent.sandbox == "read-only"
+    assert agent.claude.tools == ["Read", "Grep", "Glob"]
+    assert agent.claude.disallowed_tools == ["Write"]
+    assert agent.codex.model == "gpt-5.4"
+    assert agent.codex.nickname_candidates == ["RetroRabbit", "Rabbit Reviewer"]
