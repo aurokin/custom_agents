@@ -35,8 +35,7 @@ shared-agents clean
 
 - Claude Code: `~/.claude/agents/<name>.md`
 - Codex: `~/.codex/agents/<name>.toml`
-- Shared docs: `~/.agents/AGENTS.md` symlinked into Claude/Codex
-- Shared skills: `~/.agents/skills/*` symlinked into Claude/Codex
+- Canonical source: `<agents-home>/agents` symlinked to `~/.agents/agents` when the source lives outside the host's canonical agents home
 
 ## Notes
 
@@ -44,4 +43,6 @@ shared-agents clean
   `~/.codex/agents/`.
 - Claude output is generated as markdown files with YAML frontmatter under
   `~/.claude/agents/`.
+- The linker only manages the canonical `~/.agents/agents` symlink and skips
+  linking when the source is already `~/.agents`.
 - Cleanup is manifest-based so the tool only removes files it owns.

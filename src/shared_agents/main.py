@@ -26,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="shared-agents")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    sync = subparsers.add_parser("sync", help="Generate agents and refresh shared links")
+    sync = subparsers.add_parser("sync", help="Generate agents and refresh the canonical agents link")
     sync.add_argument("--dry-run", action="store_true")
     sync.add_argument("--agents-home", type=Path)
 

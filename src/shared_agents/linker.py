@@ -55,28 +55,16 @@ def sync_links(
 
 def build_desired_links(agents_home: Path) -> list[tuple[Path, Path]]:
     home = Path.home()
-    claude_dir = home / ".claude"
-    codex_dir = home / ".codex"
+    canonical_agents_dir = home / ".agents" / "agents"
     desired: list[tuple[Path, Path]] = []
 
-    source_agents_md = agents_home / "AGENTS.md"
-    if source_agents_md.exists():
-        desired.extend(
-            [
-                (source_agents_md, claude_dir / "CLAUDE.md"),
-                (source_agents_md, codex_dir / "AGENTS.md"),
-            ]
-        )
+    source_agents_dir = agents_home / "agents"
+    if not source_agents_dir.exists():
+        return desired
+    if source_agents_dir == canonical_agents_dir:
+        return desired
 
-    skills_dir = agents_home / "skills"
-    if skills_dir.exists():
-        for source_skill in sorted(path for path in skills_dir.iterdir() if path.is_dir()):
-            desired.extend(
-                [
-                    (source_skill, claude_dir / "skills" / source_skill.name),
-                    (source_skill, codex_dir / "skills" / source_skill.name),
-                ]
-            )
+    desired.append((source_agents_dir, canonical_agents_dir))
 
     return desired
 
