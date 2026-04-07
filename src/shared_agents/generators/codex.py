@@ -13,8 +13,10 @@ from ..schema import AgentDefinition
 
 
 def build_codex_document(
-    agent: AgentDefinition, *, emit_defaults: bool = True
+    agent: AgentDefinition, *, emit_defaults: bool | None = None
 ) -> dict[str, Any]:
+    if emit_defaults is None:
+        emit_defaults = agent.should_emit_model_defaults()
     document: dict[str, Any] = {
         "name": agent.name,
         "description": agent.description,
@@ -48,7 +50,7 @@ def build_codex_document(
     return document
 
 
-def render_codex_agent(agent: AgentDefinition, *, emit_defaults: bool = True) -> str:
+def render_codex_agent(agent: AgentDefinition, *, emit_defaults: bool | None = None) -> str:
     content = (
         _dump_toml_document(build_codex_document(agent, emit_defaults=emit_defaults)).rstrip()
         + "\n"

@@ -42,6 +42,9 @@ shared-agents clean
 
 - Codex output is generated as standalone discovered role files under
   `~/.codex/agents/`.
+- Model and reasoning/effort settings default to shared pinned defaults when
+  omitted. Set `defaults.model_strategy: floating` in `agent.yaml` to omit
+  those generated fields and let the downstream tool select defaults instead.
 - GitHub Copilot output is generated as custom agent markdown files under
   `~/.copilot/agents/` by default, or under `$COPILOT_HOME/agents/` when
   `COPILOT_HOME` is set.

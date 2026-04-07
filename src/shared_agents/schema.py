@@ -10,6 +10,7 @@ import yaml
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 SHARED_SANDBOX_VALUES = {"read-only", "workspace-write", "full-access"}
+MODEL_STRATEGY_VALUES = {"pinned-defaults", "floating"}
 CLAUDE_PERMISSION_VALUES = {
     "default",
     "acceptEdits",
@@ -81,6 +82,7 @@ class AgentDefinition:
     instructions: str
     source_dir: Path
     sandbox: str
+    model_strategy: str
     skills: list[str]
     claude: ClaudeConfig
     codex: CodexConfig
@@ -114,6 +116,9 @@ class AgentDefinition:
     def resolved_copilot_model(self) -> str | list[str]:
         return self.copilot.model or DEFAULT_COPILOT_MODEL
 
+    def should_emit_model_defaults(self) -> bool:
+        return self.model_strategy == "pinned-defaults"
+
 
 def load_agent_definition(source_dir: Path) -> AgentDefinition:
     agent_yaml_path = source_dir / "agent.yaml"
@@ -133,10 +138,25 @@ def load_agent_definition(source_dir: Path) -> AgentDefinition:
         raise SchemaError(f"instructions.md is empty: {instructions_path}")
 
     defaults_raw = _optional_mapping(raw, "defaults", agent_yaml_path)
+    defaults_unknown = set(defaults_raw) - {"sandbox", "skills", "model_strategy"}
+    if defaults_unknown:
+        unknown_keys = ", ".join(sorted(defaults_unknown))
+        raise SchemaError(
+            f"Unknown defaults keys in {agent_yaml_path}: {unknown_keys}"
+        )
     sandbox = _optional_str(defaults_raw, "sandbox", agent_yaml_path) or "read-only"
     if sandbox not in SHARED_SANDBOX_VALUES:
         raise SchemaError(
             f"Invalid defaults.sandbox in {agent_yaml_path}: {sandbox!r}"
+        )
+    model_strategy = (
+        _optional_str(defaults_raw, "model_strategy", agent_yaml_path)
+        or "pinned-defaults"
+    )
+    if model_strategy not in MODEL_STRATEGY_VALUES:
+        raise SchemaError(
+            f"Invalid defaults.model_strategy in {agent_yaml_path}: "
+            f"{model_strategy!r}"
         )
     skills = _optional_str_list(defaults_raw, "skills", agent_yaml_path, default=[])
 
@@ -291,6 +311,7 @@ def load_agent_definition(source_dir: Path) -> AgentDefinition:
         instructions=instructions,
         source_dir=source_dir,
         sandbox=sandbox,
+        model_strategy=model_strategy,
         skills=skills,
         claude=claude,
         codex=codex,

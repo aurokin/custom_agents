@@ -13,8 +13,10 @@ from .claude import write_atomic_if_changed
 
 
 def build_copilot_frontmatter(
-    agent: AgentDefinition, *, emit_defaults: bool = True
+    agent: AgentDefinition, *, emit_defaults: bool | None = None
 ) -> dict[str, Any]:
+    if emit_defaults is None:
+        emit_defaults = agent.should_emit_model_defaults()
     frontmatter: dict[str, Any] = {
         "name": agent.name,
         "description": agent.description,
@@ -58,7 +60,7 @@ def build_copilot_frontmatter(
     return frontmatter
 
 
-def render_copilot_agent(agent: AgentDefinition, *, emit_defaults: bool = True) -> str:
+def render_copilot_agent(agent: AgentDefinition, *, emit_defaults: bool | None = None) -> str:
     frontmatter = build_copilot_frontmatter(agent, emit_defaults=emit_defaults)
     yaml_block = yaml.safe_dump(
         frontmatter,

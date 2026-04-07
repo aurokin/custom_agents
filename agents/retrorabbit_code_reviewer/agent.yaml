@@ -2,8 +2,8 @@ name: retrorabbit_code_reviewer
 description: Reviews code hunks for correctness, risk, and maintainability.
 defaults:
   sandbox: read-only
+  model_strategy: floating
 claude:
-  model: opus-4.6
   tools:
     - Read
     - Grep
@@ -12,9 +12,6 @@ claude:
     - Write
   permission_mode: default
   max_turns: 16
-  effort: high
 codex:
-  model: gpt-5.4
-  model_reasoning_effort: high
   nickname_candidates:
     - RetroRabbit

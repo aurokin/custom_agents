@@ -249,6 +249,43 @@ def test_codex_generator_minimal_without_defaults(agents_home: Path) -> None:
     assert "model_reasoning_effort" not in parsed
 
 
+def test_claude_generator_minimal_with_defaults(agents_home: Path) -> None:
+    agent = load_agent_definition(install_fixture(agents_home, "minimal-agent"))
+
+    frontmatter = _parse_frontmatter(render_claude_agent(agent, emit_defaults=True))
+
+    assert frontmatter == {
+        "name": "code-reviewer",
+        "description": "Reviews code for correctness and risk.",
+        "model": "opus-4.6",
+        "effort": "high",
+    }
+
+
+def test_codex_generator_minimal_with_defaults(agents_home: Path) -> None:
+    agent = load_agent_definition(install_fixture(agents_home, "minimal-agent"))
+
+    parsed = tomllib.loads(render_codex_agent(agent, emit_defaults=True))
+
+    assert parsed["name"] == "code-reviewer"
+    assert parsed["description"] == "Reviews code for correctness and risk."
+    assert parsed["model"] == "gpt-5.4"
+    assert parsed["model_reasoning_effort"] == "high"
+    assert parsed["sandbox_mode"] == "read-only"
+
+
+def test_copilot_generator_minimal_with_defaults(agents_home: Path) -> None:
+    agent = load_agent_definition(install_fixture(agents_home, "minimal-agent"))
+
+    frontmatter = _parse_frontmatter(render_copilot_agent(agent, emit_defaults=True))
+
+    assert frontmatter == {
+        "name": "code-reviewer",
+        "description": "Reviews code for correctness and risk.",
+        "model": "gpt-5.4-high",
+    }
+
+
 def test_codex_sandbox_mapping(agents_home: Path) -> None:
     source_dir = write_agent(
         agents_home,
@@ -265,3 +302,18 @@ def test_codex_sandbox_mapping(agents_home: Path) -> None:
 
     parsed = tomllib.loads(render_codex_agent(load_agent_definition(source_dir)))
     assert parsed["sandbox_mode"] == "danger-full-access"
+
+
+def test_repo_retrorabbit_renders_as_floating_agent() -> None:
+    source_dir = Path(__file__).resolve().parents[1] / "agents" / "retrorabbit_code_reviewer"
+    agent = load_agent_definition(source_dir)
+
+    claude_frontmatter = _parse_frontmatter(render_claude_agent(agent))
+    copilot_frontmatter = _parse_frontmatter(render_copilot_agent(agent))
+    codex_document = tomllib.loads(render_codex_agent(agent))
+
+    assert "model" not in claude_frontmatter
+    assert "effort" not in claude_frontmatter
+    assert "model" not in copilot_frontmatter
+    assert "model" not in codex_document
+    assert "model_reasoning_effort" not in codex_document

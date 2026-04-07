@@ -10,8 +10,10 @@ from ..schema import AgentDefinition
 
 
 def build_claude_frontmatter(
-    agent: AgentDefinition, *, emit_defaults: bool = True
+    agent: AgentDefinition, *, emit_defaults: bool | None = None
 ) -> dict[str, Any]:
+    if emit_defaults is None:
+        emit_defaults = agent.should_emit_model_defaults()
     frontmatter: dict[str, Any] = {
         "name": agent.name,
         "description": agent.description,
@@ -38,7 +40,7 @@ def build_claude_frontmatter(
     return frontmatter
 
 
-def render_claude_agent(agent: AgentDefinition, *, emit_defaults: bool = True) -> str:
+def render_claude_agent(agent: AgentDefinition, *, emit_defaults: bool | None = None) -> str:
     frontmatter = build_claude_frontmatter(agent, emit_defaults=emit_defaults)
     yaml_block = yaml.safe_dump(
         frontmatter,

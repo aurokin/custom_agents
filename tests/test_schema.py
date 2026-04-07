@@ -16,6 +16,8 @@ def test_schema_minimal(agents_home: Path) -> None:
     assert agent.name == "code-reviewer"
     assert agent.description == "Reviews code for correctness and risk."
     assert agent.sandbox == "read-only"
+    assert agent.model_strategy == "pinned-defaults"
+    assert agent.should_emit_model_defaults() is True
     assert agent.skills == []
     assert agent.claude.model is None
     assert agent.claude.effort is None
@@ -28,6 +30,63 @@ def test_schema_minimal(agents_home: Path) -> None:
     assert agent.codex.sandbox_mode is None
     assert agent.copilot.model is None
     assert agent.resolved_copilot_model() == "gpt-5.4-high"
+
+
+def test_schema_explicit_floating_model_strategy(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "floating-reviewer",
+        "\n".join(
+            [
+                "name: floating-reviewer",
+                "description: Uses downstream model defaults",
+                "defaults:",
+                "  model_strategy: floating",
+            ]
+        ),
+    )
+
+    agent = load_agent_definition(source_dir)
+
+    assert agent.model_strategy == "floating"
+    assert agent.should_emit_model_defaults() is False
+
+
+def test_schema_rejects_invalid_model_strategy(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "invalid-model-strategy",
+        "\n".join(
+            [
+                "name: invalid-model-strategy",
+                "description: Invalid model strategy",
+                "defaults:",
+                "  model_strategy: drift",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="Invalid defaults.model_strategy"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_rejects_unknown_defaults_keys(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "unknown-defaults",
+        "\n".join(
+            [
+                "name: unknown-defaults",
+                "description: Unknown defaults key",
+                "defaults:",
+                "  sandbox: read-only",
+                "  model_mode: floating",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="Unknown defaults keys"):
+        load_agent_definition(source_dir)
 
 
 def test_schema_full(agents_home: Path) -> None:
@@ -268,9 +327,12 @@ def test_repo_retrorabbit_code_reviewer_definition() -> None:
     assert agent.name == "retrorabbit_code_reviewer"
     assert agent.description == "Reviews code hunks for correctness, risk, and maintainability."
     assert agent.sandbox == "read-only"
+    assert agent.model_strategy == "floating"
+    assert agent.should_emit_model_defaults() is False
     assert agent.claude.tools == ["Read", "Grep", "Glob"]
     assert agent.claude.disallowed_tools == ["Write"]
-    assert agent.claude.model == "opus-4.6"
-    assert agent.claude.effort == "high"
-    assert agent.codex.model == "gpt-5.4"
+    assert agent.claude.model is None
+    assert agent.claude.effort is None
+    assert agent.codex.model is None
+    assert agent.codex.model_reasoning_effort is None
     assert agent.codex.nickname_candidates == ["RetroRabbit"]
