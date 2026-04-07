@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import sys
 
 from .discover import DiscoveryError, discover_agents, resolve_agents_home
 from .generators.claude import write_claude_agent
+from .generators.copilot import write_copilot_agent
 from .generators.codex import write_codex_agent
 from .linker import prune_stale_links, sync_links
 from .manifest import Manifest, load_manifest, remove_legacy_manifest, save_manifest
@@ -17,6 +19,8 @@ from .schema import AgentDefinition
 class SyncSummary:
     claude_written: int = 0
     claude_unchanged: int = 0
+    copilot_written: int = 0
+    copilot_unchanged: int = 0
     codex_written: int = 0
     codex_unchanged: int = 0
     removed: int = 0
@@ -73,12 +77,15 @@ def _cmd_sync(agents_home: Path, dry_run: bool) -> int:
     agents = discover_agents(agents_home)
     manifest = load_manifest(agents_home)
     summary = SyncSummary()
-    desired = {"claude": [], "codex": []}
+    desired = {"claude": [], "copilot": [], "codex": []}
+    copilot_home = _resolve_copilot_home()
 
     for agent in agents:
         claude_path = Path.home() / ".claude" / "agents" / f"{agent.output_name}.md"
+        copilot_path = copilot_home / "agents" / f"{agent.output_name}.agent.md"
         codex_path = Path.home() / ".codex" / "agents" / f"{agent.output_name}.toml"
         desired["claude"].append(str(claude_path))
+        desired["copilot"].append(str(copilot_path))
         desired["codex"].append(str(codex_path))
 
         claude_status = write_claude_agent(claude_path, agent, dry_run=dry_run)
@@ -86,6 +93,12 @@ def _cmd_sync(agents_home: Path, dry_run: bool) -> int:
             summary.claude_unchanged += 1
         else:
             summary.claude_written += 1
+
+        copilot_status = write_copilot_agent(copilot_path, agent, dry_run=dry_run)
+        if copilot_status == "unchanged":
+            summary.copilot_unchanged += 1
+        else:
+            summary.copilot_written += 1
 
         codex_status = write_codex_agent(codex_path, agent, dry_run=dry_run)
         if codex_status == "unchanged":
@@ -110,6 +123,7 @@ def _cmd_sync(agents_home: Path, dry_run: bool) -> int:
             Manifest(
                 generated_files={
                     "claude": desired["claude"],
+                    "copilot": desired["copilot"],
                     "codex": desired["codex"],
                 },
                 linked_targets=linked_targets,
@@ -120,6 +134,7 @@ def _cmd_sync(agents_home: Path, dry_run: bool) -> int:
     print(
         "sync:"
         f" claude written={summary.claude_written} unchanged={summary.claude_unchanged};"
+        f" copilot written={summary.copilot_written} unchanged={summary.copilot_unchanged};"
         f" codex written={summary.codex_written} unchanged={summary.codex_unchanged};"
         f" removed={summary.removed};"
         f" links created={link_summary.created} updated={link_summary.updated}"
@@ -150,7 +165,7 @@ def _cmd_validate(agents_home: Path, agent_name: str | None) -> int:
 
 def _cmd_clean(agents_home: Path, dry_run: bool) -> int:
     manifest = load_manifest(agents_home)
-    desired = {"claude": [], "codex": []}
+    desired = {"claude": [], "copilot": [], "codex": []}
     removed = _remove_stale_generated_files(manifest, desired, dry_run=dry_run, remove_all=True)
     link_summary, link_messages = prune_stale_links(
         manifest.linked_targets,
@@ -189,6 +204,13 @@ def _remove_stale_generated_files(
                 removed += 1
                 print(f"remove generated {path}")
     return removed
+
+
+def _resolve_copilot_home() -> Path:
+    configured = os.environ.get("COPILOT_HOME")
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / ".copilot"
 
 
 if __name__ == "__main__":  # pragma: no cover

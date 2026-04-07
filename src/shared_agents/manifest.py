@@ -17,7 +17,10 @@ class Manifest:
 
     @classmethod
     def empty(cls) -> "Manifest":
-        return cls(generated_files={"claude": [], "codex": []}, linked_targets={})
+        return cls(
+            generated_files={"claude": [], "copilot": [], "codex": []},
+            linked_targets={},
+        )
 
 
 def manifest_path(agents_home: Path) -> Path:
@@ -46,6 +49,7 @@ def load_manifest(agents_home: Path) -> Manifest:
         return Manifest(
             generated_files={
                 "claude": list(generated_files.get("claude", [])),
+                "copilot": list(generated_files.get("copilot", [])),
                 "codex": list(generated_files.get("codex", [])),
             },
             linked_targets={

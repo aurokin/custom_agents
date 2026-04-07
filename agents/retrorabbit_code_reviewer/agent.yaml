@@ -3,7 +3,7 @@ description: Reviews code hunks for correctness, risk, and maintainability.
 defaults:
   sandbox: read-only
 claude:
-  model: sonnet
+  model: opus-4.6
   tools:
     - Read
     - Grep
@@ -18,4 +18,3 @@ codex:
   model_reasoning_effort: high
   nickname_candidates:
     - RetroRabbit
-    - Rabbit Reviewer

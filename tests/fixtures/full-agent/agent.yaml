@@ -6,7 +6,7 @@ defaults:
     - web-design-guidelines
     - plan-reviewer
 claude:
-  model: sonnet
+  model: opus-4.6
   tools:
     - Read
     - Grep
@@ -19,6 +19,19 @@ claude:
   mcp_servers:
     - github
   background: true
+copilot:
+  target: github-copilot
+  tools:
+    - read
+    - search
+    - edit
+    - github/*
+  model: gpt-5.4-high
+  disable_model_invocation: true
+  user_invocable: true
+  metadata:
+    owner: frontend-platform
+    tier: primary
 codex:
   model: gpt-5.4
   model_reasoning_effort: high

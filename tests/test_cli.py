@@ -23,6 +23,7 @@ def test_sync_end_to_end(agents_home: Path, fake_home: Path) -> None:
     assert main(["sync", "--agents-home", str(agents_home)]) == 0
 
     assert (fake_home / ".claude" / "agents" / "code-reviewer.md").exists()
+    assert (fake_home / ".copilot" / "agents" / "code-reviewer.agent.md").exists()
     assert (fake_home / ".codex" / "agents" / "code-reviewer.toml").exists()
     assert (fake_home / ".agents" / "agents").is_symlink()
     manifest = load_manifest(agents_home)
@@ -38,6 +39,7 @@ def test_clean_removes_manifest_owned_files(agents_home: Path, fake_home: Path) 
     assert main(["clean", "--agents-home", str(agents_home)]) == 0
 
     assert not (fake_home / ".claude" / "agents" / "code-reviewer.md").exists()
+    assert not (fake_home / ".copilot" / "agents" / "code-reviewer.agent.md").exists()
     assert not (fake_home / ".codex" / "agents" / "code-reviewer.toml").exists()
     assert not (fake_home / ".agents" / "agents").exists()
     assert load_manifest(agents_home) == load_manifest(agents_home).empty()
@@ -56,6 +58,7 @@ def test_sync_switches_agents_home_and_removes_previous_outputs(
 
     assert main(["sync", "--agents-home", str(first_home)]) == 0
     assert (fake_home / ".claude" / "agents" / "alpha.md").exists()
+    assert (fake_home / ".copilot" / "agents" / "alpha.agent.md").exists()
     assert (fake_home / ".codex" / "agents" / "alpha.toml").exists()
     assert (fake_home / ".agents" / "agents").is_symlink()
     assert (fake_home / ".agents" / "agents").resolve() == (first_home / "agents").resolve()
@@ -63,8 +66,28 @@ def test_sync_switches_agents_home_and_removes_previous_outputs(
     assert main(["sync", "--agents-home", str(second_home)]) == 0
 
     assert not (fake_home / ".claude" / "agents" / "alpha.md").exists()
+    assert not (fake_home / ".copilot" / "agents" / "alpha.agent.md").exists()
     assert not (fake_home / ".codex" / "agents" / "alpha.toml").exists()
     assert (fake_home / ".claude" / "agents" / "beta.md").exists()
+    assert (fake_home / ".copilot" / "agents" / "beta.agent.md").exists()
     assert (fake_home / ".codex" / "agents" / "beta.toml").exists()
     assert (fake_home / ".agents" / "agents").is_symlink()
     assert (fake_home / ".agents" / "agents").resolve() == (second_home / "agents").resolve()
+
+
+def test_sync_uses_copilot_home_override(
+    agents_home: Path, fake_home: Path, monkeypatch
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+    copilot_home = fake_home / ".config" / "copilot-work"
+    monkeypatch.setenv("COPILOT_HOME", str(copilot_home))
+
+    assert main(["sync", "--agents-home", str(agents_home)]) == 0
+
+    assert (copilot_home / "agents" / "code-reviewer.agent.md").exists()
+    assert not (fake_home / ".copilot" / "agents" / "code-reviewer.agent.md").exists()
+    manifest = load_manifest(agents_home)
+    assert str(copilot_home / "agents" / "code-reviewer.agent.md") in manifest.generated_files["copilot"]
+
+    assert main(["clean", "--agents-home", str(agents_home)]) == 0
+    assert not (copilot_home / "agents" / "code-reviewer.agent.md").exists()

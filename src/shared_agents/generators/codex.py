@@ -12,16 +12,24 @@ except ModuleNotFoundError:  # pragma: no cover
 from ..schema import AgentDefinition
 
 
-def build_codex_document(agent: AgentDefinition) -> dict[str, Any]:
+def build_codex_document(
+    agent: AgentDefinition, *, emit_defaults: bool = True
+) -> dict[str, Any]:
     document: dict[str, Any] = {
         "name": agent.name,
         "description": agent.description,
         "developer_instructions": agent.instructions,
     }
-    if agent.codex.model:
-        document["model"] = agent.codex.model
-    if agent.codex.model_reasoning_effort:
-        document["model_reasoning_effort"] = agent.codex.model_reasoning_effort
+    model = agent.resolved_codex_model() if emit_defaults else agent.codex.model
+    if model:
+        document["model"] = model
+    reasoning_effort = (
+        agent.resolved_codex_reasoning_effort()
+        if emit_defaults
+        else agent.codex.model_reasoning_effort
+    )
+    if reasoning_effort:
+        document["model_reasoning_effort"] = reasoning_effort
     document["sandbox_mode"] = agent.resolved_codex_sandbox_mode()
     if agent.codex.nickname_candidates:
         document["nickname_candidates"] = [item.strip() for item in agent.codex.nickname_candidates]
@@ -40,8 +48,11 @@ def build_codex_document(agent: AgentDefinition) -> dict[str, Any]:
     return document
 
 
-def render_codex_agent(agent: AgentDefinition) -> str:
-    content = _dump_toml_document(build_codex_document(agent)).rstrip() + "\n"
+def render_codex_agent(agent: AgentDefinition, *, emit_defaults: bool = True) -> str:
+    content = (
+        _dump_toml_document(build_codex_document(agent, emit_defaults=emit_defaults)).rstrip()
+        + "\n"
+    )
     tomllib.loads(content)
     return content
 
@@ -151,4 +162,3 @@ def _format_value(value: Any) -> str:
     if isinstance(value, list):
         return "[" + ", ".join(_format_value(item) for item in value) + "]"
     raise TypeError(f"Unsupported TOML value: {value!r}")
-

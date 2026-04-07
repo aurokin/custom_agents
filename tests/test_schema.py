@@ -18,7 +18,16 @@ def test_schema_minimal(agents_home: Path) -> None:
     assert agent.sandbox == "read-only"
     assert agent.skills == []
     assert agent.claude.model is None
+    assert agent.claude.effort is None
+    assert agent.resolved_claude_model() == "opus-4.6"
+    assert agent.resolved_claude_effort() == "high"
+    assert agent.codex.model is None
+    assert agent.codex.model_reasoning_effort is None
+    assert agent.resolved_codex_model() == "gpt-5.4"
+    assert agent.resolved_codex_reasoning_effort() == "high"
     assert agent.codex.sandbox_mode is None
+    assert agent.copilot.model is None
+    assert agent.resolved_copilot_model() == "gpt-5.4-high"
 
 
 def test_schema_full(agents_home: Path) -> None:
@@ -28,8 +37,17 @@ def test_schema_full(agents_home: Path) -> None:
 
     assert agent.sandbox == "workspace-write"
     assert agent.skills == ["web-design-guidelines", "plan-reviewer"]
-    assert agent.claude.model == "sonnet"
+    assert agent.claude.model == "opus-4.6"
     assert agent.claude.extra == {"background": True}
+    assert agent.copilot.target == "github-copilot"
+    assert agent.copilot.tools == ["read", "search", "edit", "github/*"]
+    assert agent.copilot.model == "gpt-5.4-high"
+    assert agent.copilot.disable_model_invocation is True
+    assert agent.copilot.user_invocable is True
+    assert agent.copilot.metadata == {
+        "owner": "frontend-platform",
+        "tier": "primary",
+    }
     assert agent.codex.model == "gpt-5.4"
     assert agent.codex.model_reasoning_effort == "high"
     assert agent.codex.nickname_candidates == ["Atlas", "Echo"]
@@ -99,6 +117,129 @@ def test_schema_unknown_codex_keys_fail(agents_home: Path) -> None:
         load_agent_definition(source_dir)
 
 
+def test_schema_unknown_copilot_keys_fail(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "bad-copilot",
+        "\n".join(
+            [
+                "name: reviewer",
+                "description: Invalid copilot config",
+                "copilot:",
+                "  unsupported: true",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="Unknown copilot keys"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_vscode_copilot_supports_model_list_and_mcp_server_list(
+    agents_home: Path,
+) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "vscode-copilot",
+        "\n".join(
+            [
+                "name: vscode-reviewer",
+                "description: VS Code Copilot agent",
+                "copilot:",
+                "  target: vscode",
+                "  agents: '*'",
+                "  model:",
+                "    - gpt-5.4-high",
+                "    - gpt-5.4",
+                "  mcp_servers:",
+                "    - id: github",
+                "      command:",
+                "        name: npx",
+                "        args:",
+                "          - -y",
+                "          - github-mcp",
+                "  argument_hint: repo:path",
+                "  disable_model_invocation: true",
+                "  user_invocable: true",
+                "  handoffs:",
+                "    - label: Code Review",
+                "      agent: code-review",
+                "      send: true",
+                "      model:",
+                "        - gpt-5.4-high",
+                "        - gpt-5.4",
+                "  hooks:",
+                "    post-edit:",
+                "      command: npm test",
+            ]
+        ),
+    )
+
+    agent = load_agent_definition(source_dir)
+
+    assert agent.copilot.target == "vscode"
+    assert agent.copilot.agents == "*"
+    assert agent.copilot.model == ["gpt-5.4-high", "gpt-5.4"]
+    assert agent.copilot.mcp_servers == [
+        {
+            "id": "github",
+            "command": {"name": "npx", "args": ["-y", "github-mcp"]},
+        }
+    ]
+    assert agent.copilot.argument_hint == "repo:path"
+    assert agent.copilot.disable_model_invocation is True
+    assert agent.copilot.user_invocable is True
+    assert agent.copilot.handoffs == [
+        {
+            "label": "Code Review",
+            "agent": "code-review",
+            "send": True,
+            "model": ["gpt-5.4-high", "gpt-5.4"],
+        }
+    ]
+    assert agent.copilot.hooks == {"post-edit": {"command": "npm test"}}
+
+
+def test_schema_vscode_copilot_rejects_github_only_metadata(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "vscode-invalid",
+        "\n".join(
+            [
+                "name: vscode-invalid",
+                "description: Invalid VS Code config",
+                "copilot:",
+                "  target: vscode",
+                "  metadata:",
+                "    team: editor",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="only supported for target 'github-copilot'"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_copilot_model_list_requires_vscode_target(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "copilot-model-list",
+        "\n".join(
+            [
+                "name: ambiguous-copilot",
+                "description: Missing explicit target",
+                "copilot:",
+                "  model:",
+                "    - gpt-5.4-high",
+                "    - gpt-5.4",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="Set copilot.target to 'vscode'"):
+        load_agent_definition(source_dir)
+
+
 def test_schema_allows_underscore_agent_name(agents_home: Path) -> None:
     source_dir = write_agent(
         agents_home,
@@ -129,5 +270,7 @@ def test_repo_retrorabbit_code_reviewer_definition() -> None:
     assert agent.sandbox == "read-only"
     assert agent.claude.tools == ["Read", "Grep", "Glob"]
     assert agent.claude.disallowed_tools == ["Write"]
+    assert agent.claude.model == "opus-4.6"
+    assert agent.claude.effort == "high"
     assert agent.codex.model == "gpt-5.4"
-    assert agent.codex.nickname_candidates == ["RetroRabbit", "Rabbit Reviewer"]
+    assert agent.codex.nickname_candidates == ["RetroRabbit"]
