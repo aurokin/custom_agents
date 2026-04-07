@@ -1,8 +1,7 @@
 # Custom Agents
 
 `custom_agents` is a small Python CLI for generating consumer-native agent
-definitions for Claude Code, GitHub Copilot, and Codex from a shared canonical source under
-`~/.agents/`.
+definitions for Claude Code, GitHub Copilot, and Codex from a shared source tree.
 
 ## Install
 
@@ -13,7 +12,7 @@ python3 -m pip install -e '.[dev]'
 ## Canonical Source Layout
 
 ```text
-~/.agents/
+<source-root>/
 ├── AGENTS.md
 ├── agents/
 │   └── code-reviewer/
@@ -26,6 +25,7 @@ python3 -m pip install -e '.[dev]'
 
 ```bash
 shared-agents sync
+shared-agents sync --link-canonical
 shared-agents list
 shared-agents validate
 shared-agents clean
@@ -36,7 +36,7 @@ shared-agents clean
 - Claude Code: `~/.claude/agents/<name>.md`
 - GitHub Copilot: `~/.copilot/agents/<name>.agent.md`
 - Codex: `~/.codex/agents/<name>.toml`
-- Canonical source: `<agents-home>/agents` symlinked to `~/.agents/agents` when the source lives outside the host's canonical agents home
+- Optional compatibility link: `<source-root>/agents` symlinked to `~/.agents/agents` only when `--link-canonical` is used
 
 ## Notes
 
@@ -47,6 +47,7 @@ shared-agents clean
   `COPILOT_HOME` is set.
 - Claude output is generated as markdown files with YAML frontmatter under
   `~/.claude/agents/`.
-- The linker only manages the canonical `~/.agents/agents` symlink and skips
-  linking when the source is already `~/.agents`.
+- Source root resolution order is: `--source-root`, current working directory
+  when it contains `agents/`, `AGENTS_HOME`, then legacy fallback `~/.agents`.
+- The canonical `~/.agents/agents` linker is opt-in via `--link-canonical`.
 - Cleanup is manifest-based so the tool only removes files it owns.

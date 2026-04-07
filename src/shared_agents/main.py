@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import sys
 
-from .discover import DiscoveryError, discover_agents, resolve_agents_home
+from .discover import DiscoveryError, discover_agents, resolve_source_root
 from .generators.claude import write_claude_agent
 from .generators.copilot import write_copilot_agent
 from .generators.codex import write_codex_agent
@@ -30,20 +30,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="shared-agents")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    sync = subparsers.add_parser("sync", help="Generate agents and refresh the canonical agents link")
+    sync = subparsers.add_parser("sync", help="Generate consumer-native agents")
     sync.add_argument("--dry-run", action="store_true")
-    sync.add_argument("--agents-home", type=Path)
+    sync.add_argument("--link-canonical", action="store_true")
+    sync.add_argument("--source-root", "--agents-home", dest="source_root", type=Path)
 
     list_cmd = subparsers.add_parser("list", help="List discovered agents")
-    list_cmd.add_argument("--agents-home", type=Path)
+    list_cmd.add_argument("--source-root", "--agents-home", dest="source_root", type=Path)
 
     validate = subparsers.add_parser("validate", help="Validate one or all agents")
     validate.add_argument("agent_name", nargs="?")
-    validate.add_argument("--agents-home", type=Path)
+    validate.add_argument("--source-root", "--agents-home", dest="source_root", type=Path)
 
     clean = subparsers.add_parser("clean", help="Remove files owned by this tool")
     clean.add_argument("--dry-run", action="store_true")
-    clean.add_argument("--agents-home", type=Path)
+    clean.add_argument("--source-root", "--agents-home", dest="source_root", type=Path)
 
     return parser
 
@@ -51,17 +52,21 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    agents_home = resolve_agents_home(args.agents_home)
+    source_root = resolve_source_root(args.source_root)
 
     try:
         if args.command == "sync":
-            return _cmd_sync(agents_home, dry_run=args.dry_run)
+            return _cmd_sync(
+                source_root,
+                dry_run=args.dry_run,
+                link_canonical=args.link_canonical,
+            )
         if args.command == "list":
-            return _cmd_list(agents_home)
+            return _cmd_list(source_root)
         if args.command == "validate":
-            return _cmd_validate(agents_home, args.agent_name)
+            return _cmd_validate(source_root, args.agent_name)
         if args.command == "clean":
-            return _cmd_clean(agents_home, dry_run=args.dry_run)
+            return _cmd_clean(source_root, dry_run=args.dry_run)
     except DiscoveryError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -73,9 +78,9 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
 
-def _cmd_sync(agents_home: Path, dry_run: bool) -> int:
-    agents = discover_agents(agents_home)
-    manifest = load_manifest(agents_home)
+def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
+    agents = discover_agents(source_root)
+    manifest = load_manifest(source_root)
     summary = SyncSummary()
     desired = {"claude": [], "copilot": [], "codex": []}
     copilot_home = _resolve_copilot_home()
@@ -109,17 +114,24 @@ def _cmd_sync(agents_home: Path, dry_run: bool) -> int:
     removed = _remove_stale_generated_files(manifest, desired, dry_run=dry_run)
     summary.removed = removed
 
-    link_summary, link_messages, linked_targets = sync_links(
-        agents_home,
-        managed_links=manifest.linked_targets,
-        dry_run=dry_run,
-    )
+    if link_canonical:
+        link_summary, link_messages, linked_targets = sync_links(
+            source_root,
+            managed_links=manifest.linked_targets,
+            dry_run=dry_run,
+        )
+    else:
+        link_summary, link_messages = prune_stale_links(
+            manifest.linked_targets,
+            dry_run=dry_run,
+        )
+        linked_targets = {}
     for message in link_messages:
         print(message)
 
     if not dry_run:
         save_manifest(
-            agents_home,
+            source_root,
             Manifest(
                 generated_files={
                     "claude": desired["claude"],
@@ -129,7 +141,7 @@ def _cmd_sync(agents_home: Path, dry_run: bool) -> int:
                 linked_targets=linked_targets,
             ),
         )
-        remove_legacy_manifest(agents_home)
+        remove_legacy_manifest(source_root)
 
     print(
         "sync:"
@@ -144,15 +156,15 @@ def _cmd_sync(agents_home: Path, dry_run: bool) -> int:
     return 0
 
 
-def _cmd_list(agents_home: Path) -> int:
-    agents = discover_agents(agents_home)
+def _cmd_list(source_root: Path) -> int:
+    agents = discover_agents(source_root)
     for agent in agents:
         print(f"{agent.name}: {agent.description} ({agent.source_dir})")
     return 0
 
 
-def _cmd_validate(agents_home: Path, agent_name: str | None) -> int:
-    agents = discover_agents(agents_home)
+def _cmd_validate(source_root: Path, agent_name: str | None) -> int:
+    agents = discover_agents(source_root)
     if agent_name:
         agents = [agent for agent in agents if agent.name == agent_name]
         if not agents:
@@ -163,8 +175,8 @@ def _cmd_validate(agents_home: Path, agent_name: str | None) -> int:
     return 0
 
 
-def _cmd_clean(agents_home: Path, dry_run: bool) -> int:
-    manifest = load_manifest(agents_home)
+def _cmd_clean(source_root: Path, dry_run: bool) -> int:
+    manifest = load_manifest(source_root)
     desired = {"claude": [], "copilot": [], "codex": []}
     removed = _remove_stale_generated_files(manifest, desired, dry_run=dry_run, remove_all=True)
     link_summary, link_messages = prune_stale_links(
@@ -175,8 +187,8 @@ def _cmd_clean(agents_home: Path, dry_run: bool) -> int:
         if message.startswith("remove managed") or message.startswith("warn"):
             print(message)
     if not dry_run:
-        save_manifest(agents_home, Manifest.empty())
-        remove_legacy_manifest(agents_home)
+        save_manifest(source_root, Manifest.empty())
+        remove_legacy_manifest(source_root)
     print(
         f"clean: removed={removed} managed-links={link_summary.removed} "
         f"warned={link_summary.warned}"
