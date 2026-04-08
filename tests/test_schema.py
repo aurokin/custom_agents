@@ -30,6 +30,7 @@ def test_schema_minimal(agents_home: Path) -> None:
     assert agent.codex.sandbox_mode is None
     assert agent.copilot.model is None
     assert agent.resolved_copilot_model() == "gpt-5.4-high"
+    assert agent.gemini.model is None
 
 
 def test_schema_explicit_floating_model_strategy(agents_home: Path) -> None:
@@ -89,6 +90,42 @@ def test_schema_rejects_unknown_defaults_keys(agents_home: Path) -> None:
         load_agent_definition(source_dir)
 
 
+def test_schema_rejects_unknown_gemini_keys(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "bad-gemini",
+        "\n".join(
+            [
+                "name: bad-gemini",
+                "description: Invalid gemini config",
+                "gemini:",
+                "  unsupported: true",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="Unknown gemini keys"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_rejects_invalid_gemini_temperature(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "invalid-gemini-temperature",
+        "\n".join(
+            [
+                "name: invalid-gemini-temperature",
+                "description: Invalid gemini temperature",
+                "gemini:",
+                "  temperature: 3",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="Invalid gemini.temperature"):
+        load_agent_definition(source_dir)
+
+
 def test_schema_full(agents_home: Path) -> None:
     source_dir = install_fixture(agents_home, "full-agent")
 
@@ -113,6 +150,17 @@ def test_schema_full(agents_home: Path) -> None:
     assert agent.codex.skills_config == [
         {"name": "web-design-guidelines", "enabled": False}
     ]
+    assert agent.gemini.tools == ["read_file", "grep_search", "mcp_github_*"]
+    assert agent.gemini.model == "gemini-2.5-flash"
+    assert agent.gemini.temperature == 0.2
+    assert agent.gemini.max_turns == 12
+    assert agent.gemini.timeout_mins == 10
+    assert agent.gemini.mcp_servers == {
+        "github": {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-github"],
+        }
+    }
 
 
 def test_schema_missing_name(agents_home: Path) -> None:
@@ -336,3 +384,6 @@ def test_repo_retrorabbit_code_reviewer_definition() -> None:
     assert agent.codex.model is None
     assert agent.codex.model_reasoning_effort is None
     assert agent.codex.nickname_candidates == ["RetroRabbit"]
+    assert agent.gemini.tools == ["read_file", "grep_search"]
+    assert agent.gemini.max_turns == 16
+    assert agent.gemini.model is None

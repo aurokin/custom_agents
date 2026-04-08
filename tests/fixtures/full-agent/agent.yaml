@@ -47,3 +47,18 @@ codex:
   skills_config:
     - name: web-design-guidelines
       enabled: false
+gemini:
+  tools:
+    - read_file
+    - grep_search
+    - mcp_github_*
+  model: gemini-2.5-flash
+  temperature: 0.2
+  max_turns: 12
+  timeout_mins: 10
+  mcp_servers:
+    github:
+      command: npx
+      args:
+        - -y
+        - "@modelcontextprotocol/server-github"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 try:
     import tomllib
@@ -10,7 +11,7 @@ except ModuleNotFoundError:  # pragma: no cover
 import yaml
 
 from shared_agents.main import main
-from shared_agents.manifest import load_manifest
+from shared_agents.manifest import legacy_manifest_path, load_manifest
 from tests.conftest import install_fixture, write_agent
 
 
@@ -37,6 +38,7 @@ def test_sync_end_to_end(agents_home: Path, fake_home: Path) -> None:
     assert (fake_home / ".claude" / "agents" / "code-reviewer.md").exists()
     assert (fake_home / ".copilot" / "agents" / "code-reviewer.agent.md").exists()
     assert (fake_home / ".codex" / "agents" / "code-reviewer.toml").exists()
+    assert (fake_home / ".gemini" / "agents" / "code-reviewer.md").exists()
     assert not (fake_home / ".agents" / "agents").exists()
     manifest = load_manifest(agents_home)
     assert manifest.generated_files["claude"]
@@ -58,12 +60,19 @@ def test_sync_end_to_end(agents_home: Path, fake_home: Path) -> None:
             encoding="utf-8"
         )
     )
+    gemini_frontmatter = _parse_frontmatter(
+        (fake_home / ".gemini" / "agents" / "code-reviewer.md").read_text(
+            encoding="utf-8"
+        )
+    )
 
     assert claude_frontmatter["model"] == "opus-4.6"
     assert claude_frontmatter["effort"] == "high"
     assert copilot_frontmatter["model"] == "gpt-5.4-high"
     assert codex_document["model"] == "gpt-5.4"
     assert codex_document["model_reasoning_effort"] == "high"
+    assert "tools" not in gemini_frontmatter
+    assert "model" not in gemini_frontmatter
 
 
 def test_sync_end_to_end_supports_explicit_floating_model_strategy(
@@ -99,12 +108,19 @@ def test_sync_end_to_end_supports_explicit_floating_model_strategy(
             encoding="utf-8"
         )
     )
+    gemini_frontmatter = _parse_frontmatter(
+        (fake_home / ".gemini" / "agents" / "floating-reviewer.md").read_text(
+            encoding="utf-8"
+        )
+    )
 
     assert "model" not in claude_frontmatter
     assert "effort" not in claude_frontmatter
     assert "model" not in copilot_frontmatter
     assert "model" not in codex_document
     assert "model_reasoning_effort" not in codex_document
+    assert "tools" not in gemini_frontmatter
+    assert "model" not in gemini_frontmatter
 
 
 def test_sync_floating_strategy_preserves_explicit_model_settings(
@@ -127,6 +143,9 @@ def test_sync_floating_strategy_preserves_explicit_model_settings(
                 "codex:",
                 "  model: gpt-5.4",
                 "  model_reasoning_effort: high",
+                "gemini:",
+                "  model: gemini-2.5-flash",
+                "  max_turns: 12",
             ]
         ),
     )
@@ -148,12 +167,19 @@ def test_sync_floating_strategy_preserves_explicit_model_settings(
             encoding="utf-8"
         )
     )
+    gemini_frontmatter = _parse_frontmatter(
+        (fake_home / ".gemini" / "agents" / "floating-but-pinned.md").read_text(
+            encoding="utf-8"
+        )
+    )
 
     assert claude_frontmatter["model"] == "opus-4.6"
     assert claude_frontmatter["effort"] == "high"
     assert copilot_frontmatter["model"] == "gpt-5.4-high"
     assert codex_document["model"] == "gpt-5.4"
     assert codex_document["model_reasoning_effort"] == "high"
+    assert gemini_frontmatter["model"] == "gemini-2.5-flash"
+    assert gemini_frontmatter["max_turns"] == 12
 
 
 def test_sync_end_to_end_preserves_explicit_model_settings(
@@ -178,12 +204,20 @@ def test_sync_end_to_end_preserves_explicit_model_settings(
             encoding="utf-8"
         )
     )
+    gemini_frontmatter = _parse_frontmatter(
+        (fake_home / ".gemini" / "agents" / "frontend-reviewer.md").read_text(
+            encoding="utf-8"
+        )
+    )
 
     assert claude_frontmatter["model"] == "opus-4.6"
     assert claude_frontmatter["effort"] == "high"
     assert copilot_frontmatter["model"] == "gpt-5.4-high"
     assert codex_document["model"] == "gpt-5.4"
     assert codex_document["model_reasoning_effort"] == "high"
+    assert gemini_frontmatter["tools"] == ["read_file", "grep_search", "mcp_github_*"]
+    assert gemini_frontmatter["model"] == "gemini-2.5-flash"
+    assert gemini_frontmatter["temperature"] == 0.2
 
 
 def test_clean_removes_manifest_owned_files(agents_home: Path, fake_home: Path) -> None:
@@ -195,7 +229,68 @@ def test_clean_removes_manifest_owned_files(agents_home: Path, fake_home: Path) 
     assert not (fake_home / ".claude" / "agents" / "code-reviewer.md").exists()
     assert not (fake_home / ".copilot" / "agents" / "code-reviewer.agent.md").exists()
     assert not (fake_home / ".codex" / "agents" / "code-reviewer.toml").exists()
+    assert not (fake_home / ".gemini" / "agents" / "code-reviewer.md").exists()
     assert load_manifest(agents_home) == load_manifest(agents_home).empty()
+
+
+def test_sync_and_clean_support_legacy_manifest_without_gemini_key(
+    agents_home: Path, fake_home: Path
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+    legacy_path = legacy_manifest_path(agents_home)
+    stale_codex_path = fake_home / ".codex" / "agents" / "stale-reviewer.toml"
+    stale_codex_path.parent.mkdir(parents=True, exist_ok=True)
+    stale_codex_path.write_text("name = 'stale-reviewer'\n", encoding="utf-8")
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "generated_files": {
+                    "claude": [],
+                    "copilot": [],
+                    "codex": [str(stale_codex_path)],
+                },
+                "linked_targets": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+    assert (fake_home / ".gemini" / "agents" / "code-reviewer.md").exists()
+    assert not stale_codex_path.exists()
+    assert not legacy_path.exists()
+
+    assert main(["clean", "--source-root", str(agents_home)]) == 0
+    assert not (fake_home / ".gemini" / "agents" / "code-reviewer.md").exists()
+
+
+def test_clean_supports_legacy_manifest_without_gemini_key(
+    agents_home: Path, fake_home: Path
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+    legacy_path = legacy_manifest_path(agents_home)
+    stale_codex_path = fake_home / ".codex" / "agents" / "stale-reviewer.toml"
+    stale_codex_path.parent.mkdir(parents=True, exist_ok=True)
+    stale_codex_path.write_text("name = 'stale-reviewer'\n", encoding="utf-8")
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "generated_files": {
+                    "claude": [],
+                    "copilot": [],
+                    "codex": [str(stale_codex_path)],
+                },
+                "linked_targets": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["clean", "--source-root", str(agents_home)]) == 0
+    assert not stale_codex_path.exists()
+    assert not legacy_path.exists()
 
 
 def test_sync_switches_source_root_and_removes_previous_outputs(
@@ -213,15 +308,18 @@ def test_sync_switches_source_root_and_removes_previous_outputs(
     assert (fake_home / ".claude" / "agents" / "alpha.md").exists()
     assert (fake_home / ".copilot" / "agents" / "alpha.agent.md").exists()
     assert (fake_home / ".codex" / "agents" / "alpha.toml").exists()
+    assert (fake_home / ".gemini" / "agents" / "alpha.md").exists()
 
     assert main(["sync", "--source-root", str(second_home)]) == 0
 
     assert not (fake_home / ".claude" / "agents" / "alpha.md").exists()
     assert not (fake_home / ".copilot" / "agents" / "alpha.agent.md").exists()
     assert not (fake_home / ".codex" / "agents" / "alpha.toml").exists()
+    assert not (fake_home / ".gemini" / "agents" / "alpha.md").exists()
     assert (fake_home / ".claude" / "agents" / "beta.md").exists()
     assert (fake_home / ".copilot" / "agents" / "beta.agent.md").exists()
     assert (fake_home / ".codex" / "agents" / "beta.toml").exists()
+    assert (fake_home / ".gemini" / "agents" / "beta.md").exists()
 
 
 def test_sync_can_optionally_link_canonical_agents_dir(

@@ -10,6 +10,7 @@ from .discover import DiscoveryError, discover_agents, resolve_source_root
 from .generators.claude import write_claude_agent
 from .generators.copilot import write_copilot_agent
 from .generators.codex import write_codex_agent
+from .generators.gemini import write_gemini_agent
 from .linker import prune_stale_links, sync_links
 from .manifest import Manifest, load_manifest, remove_legacy_manifest, save_manifest
 from .schema import AgentDefinition
@@ -23,6 +24,8 @@ class SyncSummary:
     copilot_unchanged: int = 0
     codex_written: int = 0
     codex_unchanged: int = 0
+    gemini_written: int = 0
+    gemini_unchanged: int = 0
     removed: int = 0
 
 
@@ -82,16 +85,19 @@ def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
     agents = discover_agents(source_root)
     manifest = load_manifest(source_root)
     summary = SyncSummary()
-    desired = {"claude": [], "copilot": [], "codex": []}
+    desired = {"claude": [], "copilot": [], "codex": [], "gemini": []}
     copilot_home = _resolve_copilot_home()
+    gemini_home = Path.home() / ".gemini"
 
     for agent in agents:
         claude_path = Path.home() / ".claude" / "agents" / f"{agent.output_name}.md"
         copilot_path = copilot_home / "agents" / f"{agent.output_name}.agent.md"
         codex_path = Path.home() / ".codex" / "agents" / f"{agent.output_name}.toml"
+        gemini_path = gemini_home / "agents" / f"{agent.output_name}.md"
         desired["claude"].append(str(claude_path))
         desired["copilot"].append(str(copilot_path))
         desired["codex"].append(str(codex_path))
+        desired["gemini"].append(str(gemini_path))
 
         claude_status = write_claude_agent(claude_path, agent, dry_run=dry_run)
         if claude_status == "unchanged":
@@ -110,6 +116,12 @@ def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
             summary.codex_unchanged += 1
         else:
             summary.codex_written += 1
+
+        gemini_status = write_gemini_agent(gemini_path, agent, dry_run=dry_run)
+        if gemini_status == "unchanged":
+            summary.gemini_unchanged += 1
+        else:
+            summary.gemini_written += 1
 
     removed = _remove_stale_generated_files(manifest, desired, dry_run=dry_run)
     summary.removed = removed
@@ -137,6 +149,7 @@ def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
                     "claude": desired["claude"],
                     "copilot": desired["copilot"],
                     "codex": desired["codex"],
+                    "gemini": desired["gemini"],
                 },
                 linked_targets=linked_targets,
             ),
@@ -148,6 +161,7 @@ def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
         f" claude written={summary.claude_written} unchanged={summary.claude_unchanged};"
         f" copilot written={summary.copilot_written} unchanged={summary.copilot_unchanged};"
         f" codex written={summary.codex_written} unchanged={summary.codex_unchanged};"
+        f" gemini written={summary.gemini_written} unchanged={summary.gemini_unchanged};"
         f" removed={summary.removed};"
         f" links created={link_summary.created} updated={link_summary.updated}"
         f" skipped={link_summary.skipped} warned={link_summary.warned}"
@@ -177,7 +191,7 @@ def _cmd_validate(source_root: Path, agent_name: str | None) -> int:
 
 def _cmd_clean(source_root: Path, dry_run: bool) -> int:
     manifest = load_manifest(source_root)
-    desired = {"claude": [], "copilot": [], "codex": []}
+    desired = {"claude": [], "copilot": [], "codex": [], "gemini": []}
     removed = _remove_stale_generated_files(manifest, desired, dry_run=dry_run, remove_all=True)
     link_summary, link_messages = prune_stale_links(
         manifest.linked_targets,

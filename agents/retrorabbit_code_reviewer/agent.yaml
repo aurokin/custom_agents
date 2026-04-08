@@ -15,3 +15,8 @@ claude:
 codex:
   nickname_candidates:
     - RetroRabbit
+gemini:
+  tools:
+    - read_file
+    - grep_search
+  max_turns: 16

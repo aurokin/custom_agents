@@ -76,6 +76,16 @@ class CopilotConfig:
 
 
 @dataclass(frozen=True)
+class GeminiConfig:
+    tools: list[str] | None = None
+    model: str | None = None
+    temperature: float | None = None
+    max_turns: int | None = None
+    timeout_mins: int | None = None
+    mcp_servers: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
 class AgentDefinition:
     name: str
     description: str
@@ -87,6 +97,7 @@ class AgentDefinition:
     claude: ClaudeConfig
     codex: CodexConfig
     copilot: CopilotConfig
+    gemini: GeminiConfig
 
     @property
     def output_name(self) -> str:
@@ -293,6 +304,31 @@ def load_agent_definition(source_dir: Path) -> AgentDefinition:
         )
     _validate_copilot_config(copilot, agent_yaml_path)
 
+    gemini_raw = _optional_mapping(raw, "gemini", agent_yaml_path)
+    gemini_unknown = set(gemini_raw) - {
+        "tools",
+        "model",
+        "temperature",
+        "max_turns",
+        "timeout_mins",
+        "mcp_servers",
+    }
+    if gemini_unknown:
+        unknown_keys = ", ".join(sorted(gemini_unknown))
+        raise SchemaError(
+            f"Unknown gemini keys in {agent_yaml_path}: {unknown_keys}"
+        )
+    gemini = GeminiConfig(
+        tools=_optional_str_list(gemini_raw, "tools", agent_yaml_path),
+        model=_optional_str(gemini_raw, "model", agent_yaml_path),
+        temperature=_optional_number(gemini_raw, "temperature", agent_yaml_path),
+        max_turns=_optional_int(gemini_raw, "max_turns", agent_yaml_path),
+        timeout_mins=_optional_int(gemini_raw, "timeout_mins", agent_yaml_path),
+        mcp_servers=_optional_mapping(gemini_raw, "mcp_servers", agent_yaml_path)
+        or None,
+    )
+    _validate_gemini_config(gemini, agent_yaml_path)
+
     unknown_top_level = set(raw) - {
         "name",
         "description",
@@ -300,6 +336,7 @@ def load_agent_definition(source_dir: Path) -> AgentDefinition:
         "claude",
         "codex",
         "copilot",
+        "gemini",
     }
     if unknown_top_level:
         unknown_keys = ", ".join(sorted(unknown_top_level))
@@ -316,6 +353,7 @@ def load_agent_definition(source_dir: Path) -> AgentDefinition:
         claude=claude,
         codex=codex,
         copilot=copilot,
+        gemini=gemini,
     )
 
 
@@ -373,6 +411,15 @@ def _optional_bool(data: dict[str, Any], key: str, path: Path) -> bool | None:
     if not isinstance(value, bool):
         raise SchemaError(f"Expected {key!r} to be a boolean in {path}")
     return value
+
+
+def _optional_number(data: dict[str, Any], key: str, path: Path) -> float | None:
+    if key not in data or data[key] is None:
+        return None
+    value = data[key]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise SchemaError(f"Expected {key!r} to be a number in {path}")
+    return float(value)
 
 
 def _optional_str_list(
@@ -694,3 +741,16 @@ def _validate_codex_config(config: dict[str, Any], path: Path) -> None:
         raise SchemaError(
             f"codex.config in {path} contains fields handled elsewhere: {keys}"
         )
+
+
+def _validate_gemini_config(config: GeminiConfig, path: Path) -> None:
+    if config.temperature is not None and not (0.0 <= config.temperature <= 2.0):
+        raise SchemaError(
+            f"Invalid gemini.temperature in {path}: {config.temperature!r}"
+        )
+    for field_name in ("max_turns", "timeout_mins"):
+        value = getattr(config, field_name)
+        if value is not None and value <= 0:
+            raise SchemaError(
+                f"Invalid gemini.{field_name} in {path}: {value!r}"
+            )

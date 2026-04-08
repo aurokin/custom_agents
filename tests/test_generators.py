@@ -12,6 +12,7 @@ import yaml
 from shared_agents.generators.claude import build_claude_frontmatter, render_claude_agent
 from shared_agents.generators.copilot import build_copilot_frontmatter, render_copilot_agent
 from shared_agents.generators.codex import build_codex_document, render_codex_agent
+from shared_agents.generators.gemini import build_gemini_frontmatter, render_gemini_agent
 from shared_agents.schema import load_agent_definition
 from tests.conftest import install_fixture, write_agent
 
@@ -72,6 +73,21 @@ def test_codex_generator_minimal(agents_home: Path) -> None:
     assert "developer_instructions" in parsed
 
 
+def test_gemini_generator_minimal_omits_tools_and_model(agents_home: Path) -> None:
+    agent = load_agent_definition(install_fixture(agents_home, "minimal-agent"))
+
+    rendered = render_gemini_agent(agent)
+    frontmatter = _parse_frontmatter(rendered)
+
+    assert frontmatter == {
+        "name": "code-reviewer",
+        "description": "Reviews code for correctness and risk.",
+    }
+    assert "tools" not in frontmatter
+    assert "model" not in frontmatter
+    assert "focused code reviewer" in rendered
+
+
 def test_copilot_generator_minimal(agents_home: Path) -> None:
     agent = load_agent_definition(install_fixture(agents_home, "minimal-agent"))
 
@@ -130,6 +146,25 @@ def test_copilot_generator_full(agents_home: Path) -> None:
     }
 
 
+def test_gemini_generator_full(agents_home: Path) -> None:
+    agent = load_agent_definition(install_fixture(agents_home, "full-agent"))
+
+    rendered = render_gemini_agent(agent)
+    frontmatter = _parse_frontmatter(rendered)
+
+    assert frontmatter["tools"] == ["read_file", "grep_search", "mcp_github_*"]
+    assert frontmatter["model"] == "gemini-2.5-flash"
+    assert frontmatter["temperature"] == 0.2
+    assert frontmatter["max_turns"] == 12
+    assert frontmatter["timeout_mins"] == 10
+    assert frontmatter["mcpServers"] == {
+        "github": {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-github"],
+        }
+    }
+
+
 def test_copilot_generator_preserves_empty_tools_list(agents_home: Path) -> None:
     source_dir = write_agent(
         agents_home,
@@ -151,6 +186,27 @@ def test_copilot_generator_preserves_empty_tools_list(agents_home: Path) -> None
     assert frontmatter["tools"] == []
 
 
+def test_gemini_generator_preserves_empty_tools_list(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "gemini-no-tools",
+        "\n".join(
+            [
+                "name: locked-down-gemini-reviewer",
+                "description: Gemini agent with no tools",
+                "gemini:",
+                "  tools: []",
+            ]
+        ),
+    )
+
+    frontmatter = _parse_frontmatter(
+        render_gemini_agent(load_agent_definition(source_dir))
+    )
+
+    assert frontmatter["tools"] == []
+
+
 def test_codex_generator_roundtrip(agents_home: Path) -> None:
     agent = load_agent_definition(install_fixture(agents_home, "full-agent"))
 
@@ -162,6 +218,14 @@ def test_copilot_generator_roundtrip(agents_home: Path) -> None:
 
     assert build_copilot_frontmatter(agent) == _parse_frontmatter(
         render_copilot_agent(agent)
+    )
+
+
+def test_gemini_generator_roundtrip(agents_home: Path) -> None:
+    agent = load_agent_definition(install_fixture(agents_home, "full-agent"))
+
+    assert build_gemini_frontmatter(agent) == _parse_frontmatter(
+        render_gemini_agent(agent)
     )
 
 
@@ -311,9 +375,13 @@ def test_repo_retrorabbit_renders_as_floating_agent() -> None:
     claude_frontmatter = _parse_frontmatter(render_claude_agent(agent))
     copilot_frontmatter = _parse_frontmatter(render_copilot_agent(agent))
     codex_document = tomllib.loads(render_codex_agent(agent))
+    gemini_frontmatter = _parse_frontmatter(render_gemini_agent(agent))
 
     assert "model" not in claude_frontmatter
     assert "effort" not in claude_frontmatter
     assert "model" not in copilot_frontmatter
     assert "model" not in codex_document
     assert "model_reasoning_effort" not in codex_document
+    assert gemini_frontmatter["tools"] == ["read_file", "grep_search"]
+    assert gemini_frontmatter["max_turns"] == 16
+    assert "model" not in gemini_frontmatter
