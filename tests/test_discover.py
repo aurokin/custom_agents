@@ -56,3 +56,12 @@ def test_discover_uses_agents_home_env_when_cwd_has_no_agents(
 
     assert resolve_source_root() == agents_home.resolve()
     assert [agent.name for agent in discover_agents()] == ["env-agent"]
+
+
+def test_repo_contains_plan_reviewer_agent() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+
+    agents = {agent.name: agent for agent in discover_agents(repo_root)}
+
+    assert "plan-reviewer" in agents
+    assert agents["plan-reviewer"].source_dir == repo_root / "agents" / "plan-reviewer"
