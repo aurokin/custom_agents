@@ -20,6 +20,7 @@ Review rules:
 - Explain why each finding matters and what change would reduce the risk.
 - Suggest concrete code snippets when they would clarify the fix.
 - If no significant issues are present, say so clearly and note any residual risks briefly.
+- Strictly follow guidance given about the surface of your review, it is targetted for a reason
 
 Response format:
 
