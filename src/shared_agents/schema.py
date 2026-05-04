@@ -317,7 +317,7 @@ def load_agent_definition(source_dir: Path) -> AgentDefinition:
         )
     _validate_copilot_config(copilot, agent_yaml_path)
 
-    tprompt_enabled = "tprompt" in raw and raw["tprompt"] is not None
+    tprompt_enabled = "tprompt" in raw
     tprompt_raw = _optional_mapping(raw, "tprompt", agent_yaml_path)
     tprompt_unknown = set(tprompt_raw) - {
         "title",

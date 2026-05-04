@@ -408,6 +408,25 @@ def test_schema_tprompt_empty_block_enables_export(agents_home: Path) -> None:
     assert agent.tprompt.title is None
 
 
+def test_schema_tprompt_bare_key_enables_export(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "tprompt-bare",
+        "\n".join(
+            [
+                "name: tprompt-bare",
+                "description: Bare tprompt key parses as null but still opts in",
+                "tprompt:",
+            ]
+        ),
+    )
+
+    agent = load_agent_definition(source_dir)
+
+    assert agent.tprompt.enabled is True
+    assert agent.tprompt.title is None
+
+
 def test_schema_tprompt_rejects_unknown_keys(agents_home: Path) -> None:
     source_dir = write_agent(
         agents_home,

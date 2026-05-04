@@ -91,6 +91,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
     agents = discover_agents(source_root)
+    _check_tprompt_path_collisions(agents)
     manifest = load_manifest(source_root)
     summary = SyncSummary()
     desired = {
@@ -279,6 +280,20 @@ def _remove_stale_generated_files(
                 removed += 1
                 print(f"remove generated {path}")
     return removed
+
+
+def _check_tprompt_path_collisions(agents: list[AgentDefinition]) -> None:
+    seen: dict[str, str] = {}
+    for agent in agents:
+        if not agent.tprompt.enabled:
+            continue
+        path = str(tprompt_output_path(agent))
+        if path in seen:
+            raise DiscoveryError(
+                f"Duplicate tprompt output path {path!r} for agents "
+                f"{seen[path]!r} and {agent.name!r}; set a unique tprompt.filename."
+            )
+        seen[path] = agent.name
 
 
 def _resolve_copilot_home() -> Path:

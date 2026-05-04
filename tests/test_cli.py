@@ -456,6 +456,44 @@ def test_resync_preserves_tprompt_file_when_binary_disappears(
     assert str(target) in manifest.generated_files["tprompt"]
 
 
+def test_sync_rejects_duplicate_tprompt_filename(
+    agents_home: Path,
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    write_agent(
+        agents_home,
+        "first-agent",
+        "\n".join(
+            [
+                "name: first-agent",
+                "description: First",
+                "tprompt:",
+                "  filename: shared-name",
+            ]
+        ),
+    )
+    write_agent(
+        agents_home,
+        "second-agent",
+        "\n".join(
+            [
+                "name: second-agent",
+                "description: Second",
+                "tprompt:",
+                "  filename: shared-name",
+            ]
+        ),
+    )
+    _install_fake_tprompt(fake_home, monkeypatch)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 1
+    captured = capsys.readouterr()
+    assert "Duplicate tprompt output path" in captured.err
+
+
 def test_clean_removes_tprompt_files(
     agents_home: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
