@@ -18,7 +18,13 @@ class Manifest:
     @classmethod
     def empty(cls) -> "Manifest":
         return cls(
-            generated_files={"claude": [], "copilot": [], "codex": [], "gemini": []},
+            generated_files={
+                "claude": [],
+                "copilot": [],
+                "codex": [],
+                "gemini": [],
+                "tprompt": [],
+            },
             linked_targets={},
         )
 
@@ -52,6 +58,7 @@ def load_manifest(agents_home: Path) -> Manifest:
                 "copilot": list(generated_files.get("copilot", [])),
                 "codex": list(generated_files.get("codex", [])),
                 "gemini": list(generated_files.get("gemini", [])),
+                "tprompt": list(generated_files.get("tprompt", [])),
             },
             linked_targets={
                 str(target): str(source)

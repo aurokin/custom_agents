@@ -86,6 +86,18 @@ class GeminiConfig:
 
 
 @dataclass(frozen=True)
+class TpromptConfig:
+    enabled: bool = False
+    title: str | None = None
+    description: str | None = None
+    tags: list[str] | None = None
+    key: str | None = None
+    mode: str | None = None
+    enter: bool | None = None
+    filename: str | None = None
+
+
+@dataclass(frozen=True)
 class AgentDefinition:
     name: str
     description: str
@@ -98,6 +110,7 @@ class AgentDefinition:
     codex: CodexConfig
     copilot: CopilotConfig
     gemini: GeminiConfig
+    tprompt: TpromptConfig
 
     @property
     def output_name(self) -> str:
@@ -304,6 +317,39 @@ def load_agent_definition(source_dir: Path) -> AgentDefinition:
         )
     _validate_copilot_config(copilot, agent_yaml_path)
 
+    tprompt_enabled = "tprompt" in raw and raw["tprompt"] is not None
+    tprompt_raw = _optional_mapping(raw, "tprompt", agent_yaml_path)
+    tprompt_unknown = set(tprompt_raw) - {
+        "title",
+        "description",
+        "tags",
+        "key",
+        "mode",
+        "enter",
+        "filename",
+    }
+    if tprompt_unknown:
+        unknown_keys = ", ".join(sorted(tprompt_unknown))
+        raise SchemaError(
+            f"Unknown tprompt keys in {agent_yaml_path}: {unknown_keys}"
+        )
+    tprompt_filename = _optional_str(tprompt_raw, "filename", agent_yaml_path)
+    if tprompt_filename is not None and not NAME_RE.fullmatch(tprompt_filename):
+        raise SchemaError(
+            f"Invalid tprompt.filename in {agent_yaml_path}: {tprompt_filename!r}. "
+            "Use lowercase letters, digits, hyphens, and underscores."
+        )
+    tprompt = TpromptConfig(
+        enabled=tprompt_enabled,
+        title=_optional_str(tprompt_raw, "title", agent_yaml_path),
+        description=_optional_str(tprompt_raw, "description", agent_yaml_path),
+        tags=_optional_str_list(tprompt_raw, "tags", agent_yaml_path),
+        key=_optional_str(tprompt_raw, "key", agent_yaml_path),
+        mode=_optional_str(tprompt_raw, "mode", agent_yaml_path),
+        enter=_optional_bool(tprompt_raw, "enter", agent_yaml_path),
+        filename=tprompt_filename,
+    )
+
     gemini_raw = _optional_mapping(raw, "gemini", agent_yaml_path)
     gemini_unknown = set(gemini_raw) - {
         "tools",
@@ -337,6 +383,7 @@ def load_agent_definition(source_dir: Path) -> AgentDefinition:
         "codex",
         "copilot",
         "gemini",
+        "tprompt",
     }
     if unknown_top_level:
         unknown_keys = ", ".join(sorted(unknown_top_level))
@@ -354,6 +401,7 @@ def load_agent_definition(source_dir: Path) -> AgentDefinition:
         codex=codex,
         copilot=copilot,
         gemini=gemini,
+        tprompt=tprompt,
     )
 
 
