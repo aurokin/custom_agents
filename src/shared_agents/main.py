@@ -145,10 +145,12 @@ def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
         if not agent.tprompt.enabled:
             continue
         tprompt_path = tprompt_output_path(agent)
-        desired["tprompt"].append(str(tprompt_path))
         if tprompt_bin is None:
             summary.tprompt_skipped += 1
+            if tprompt_path.exists():
+                desired["tprompt"].append(str(tprompt_path))
             continue
+        desired["tprompt"].append(str(tprompt_path))
         tprompt_status = write_tprompt_agent(
             tprompt_path, agent, executable=tprompt_bin, dry_run=dry_run
         )

@@ -431,7 +431,28 @@ def test_sync_warns_and_skips_when_tprompt_missing(
     captured = capsys.readouterr()
     assert "tprompt not on PATH" in captured.err
     manifest = load_manifest(agents_home)
-    assert str(target) in manifest.generated_files["tprompt"]
+    assert str(target) not in manifest.generated_files["tprompt"]
+
+
+def test_first_sync_without_binary_does_not_claim_unwritten_path(
+    agents_home: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_fixture(agents_home, "tprompt-agent")
+    monkeypatch.setenv("PATH", str(fake_home / "nonexistent-bin"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+
+    target = fake_home / ".config" / "tprompt" / "prompts" / "skill-reviewer-ca.md"
+    manifest = load_manifest(agents_home)
+    assert str(target) not in manifest.generated_files["tprompt"]
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("hand-authored content\n", encoding="utf-8")
+
+    assert main(["clean", "--source-root", str(agents_home)]) == 0
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == "hand-authored content\n"
 
 
 def test_resync_preserves_tprompt_file_when_binary_disappears(
