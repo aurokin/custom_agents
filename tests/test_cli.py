@@ -426,13 +426,34 @@ def test_sync_warns_and_skips_when_tprompt_missing(
 
     assert main(["sync", "--source-root", str(agents_home)]) == 0
 
-    assert not (
-        fake_home / ".config" / "tprompt" / "prompts" / "skill-reviewer-ca.md"
-    ).exists()
+    target = fake_home / ".config" / "tprompt" / "prompts" / "skill-reviewer-ca.md"
+    assert not target.exists()
     captured = capsys.readouterr()
     assert "tprompt not on PATH" in captured.err
     manifest = load_manifest(agents_home)
-    assert manifest.generated_files["tprompt"] == []
+    assert str(target) in manifest.generated_files["tprompt"]
+
+
+def test_resync_preserves_tprompt_file_when_binary_disappears(
+    agents_home: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_fixture(agents_home, "tprompt-agent")
+    prompts_dir = _install_fake_tprompt(fake_home, monkeypatch)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+    target = prompts_dir / "skill-reviewer-ca.md"
+    assert target.exists()
+    original_content = target.read_text(encoding="utf-8")
+
+    monkeypatch.setenv("PATH", str(fake_home / "nonexistent-bin"))
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == original_content
+    manifest = load_manifest(agents_home)
+    assert str(target) in manifest.generated_files["tprompt"]
 
 
 def test_clean_removes_tprompt_files(
