@@ -13,6 +13,12 @@ from shared_agents.generators.claude import build_claude_frontmatter, render_cla
 from shared_agents.generators.copilot import build_copilot_frontmatter, render_copilot_agent
 from shared_agents.generators.codex import build_codex_document, render_codex_agent
 from shared_agents.generators.gemini import build_gemini_frontmatter, render_gemini_agent
+from shared_agents.generators.tprompt import (
+    SUBAGENT_FOOTER,
+    build_tprompt_frontmatter,
+    render_tprompt_agent,
+    tprompt_prompt_id,
+)
 from shared_agents.schema import load_agent_definition
 from tests.conftest import install_fixture, write_agent
 
@@ -366,6 +372,73 @@ def test_codex_sandbox_mapping(agents_home: Path) -> None:
 
     parsed = tomllib.loads(render_codex_agent(load_agent_definition(source_dir)))
     assert parsed["sandbox_mode"] == "danger-full-access"
+
+
+def test_tprompt_generator_renders_explicit_fields(agents_home: Path) -> None:
+    agent = load_agent_definition(install_fixture(agents_home, "tprompt-agent"))
+
+    rendered = render_tprompt_agent(agent)
+    frontmatter = _parse_frontmatter(rendered)
+
+    assert frontmatter == {
+        "title": "Skill Reviewer",
+        "description": "Acts like a skill that reviews changes in the main thread.",
+        "tags": ["review", "skill"],
+        "key": "r",
+    }
+    assert "Review the staged diff" in rendered
+    assert rendered.rstrip("\n").endswith(SUBAGENT_FOOTER)
+    assert tprompt_prompt_id(agent) == "skill-reviewer-ca"
+
+
+def test_tprompt_generator_defaults_title_from_name(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "tprompt-defaults",
+        "\n".join(
+            [
+                "name: plan-reviewer",
+                "description: Skeptical plan review.",
+                "tprompt: {}",
+            ]
+        ),
+    )
+    agent = load_agent_definition(source_dir)
+
+    frontmatter = _parse_frontmatter(render_tprompt_agent(agent))
+
+    assert frontmatter == {
+        "title": "Plan Reviewer",
+        "description": "Skeptical plan review.",
+        "tags": [],
+    }
+    assert tprompt_prompt_id(agent) == "plan-reviewer-ca"
+
+
+def test_tprompt_generator_filename_overrides_prompt_id(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "tprompt-filename-override",
+        "\n".join(
+            [
+                "name: retrorabbit_code_reviewer",
+                "description: Review hunks.",
+                "tprompt:",
+                "  filename: rabbit-review",
+            ]
+        ),
+    )
+    agent = load_agent_definition(source_dir)
+
+    assert tprompt_prompt_id(agent) == "rabbit-review-ca"
+
+
+def test_tprompt_generator_roundtrip(agents_home: Path) -> None:
+    agent = load_agent_definition(install_fixture(agents_home, "tprompt-agent"))
+
+    assert build_tprompt_frontmatter(agent) == _parse_frontmatter(
+        render_tprompt_agent(agent)
+    )
 
 
 def test_repo_retrorabbit_renders_as_floating_agent() -> None:

@@ -11,6 +11,11 @@ from .generators.claude import write_claude_agent
 from .generators.copilot import write_copilot_agent
 from .generators.codex import write_codex_agent
 from .generators.gemini import write_gemini_agent
+from .generators.tprompt import (
+    tprompt_executable,
+    tprompt_output_path,
+    write_tprompt_agent,
+)
 from .linker import prune_stale_links, sync_links
 from .manifest import Manifest, load_manifest, remove_legacy_manifest, save_manifest
 from .schema import AgentDefinition
@@ -26,6 +31,9 @@ class SyncSummary:
     codex_unchanged: int = 0
     gemini_written: int = 0
     gemini_unchanged: int = 0
+    tprompt_written: int = 0
+    tprompt_unchanged: int = 0
+    tprompt_skipped: int = 0
     removed: int = 0
 
 
@@ -83,11 +91,22 @@ def main(argv: list[str] | None = None) -> int:
 
 def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
     agents = discover_agents(source_root)
+    _check_tprompt_path_collisions(agents)
     manifest = load_manifest(source_root)
     summary = SyncSummary()
-    desired = {"claude": [], "copilot": [], "codex": [], "gemini": []}
+    desired = {
+        "claude": [],
+        "copilot": [],
+        "codex": [],
+        "gemini": [],
+        "tprompt": [],
+    }
     copilot_home = _resolve_copilot_home()
     gemini_home = Path.home() / ".gemini"
+    tprompt_bin = tprompt_executable()
+    tprompt_warning_pending = any(agent.tprompt.enabled for agent in agents) and (
+        tprompt_bin is None
+    )
 
     for agent in agents:
         claude_path = Path.home() / ".claude" / "agents" / f"{agent.output_name}.md"
@@ -123,6 +142,30 @@ def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
         else:
             summary.gemini_written += 1
 
+        if not agent.tprompt.enabled:
+            continue
+        tprompt_path = tprompt_output_path(agent)
+        if tprompt_bin is None:
+            summary.tprompt_skipped += 1
+            if tprompt_path.exists():
+                desired["tprompt"].append(str(tprompt_path))
+            continue
+        desired["tprompt"].append(str(tprompt_path))
+        tprompt_status = write_tprompt_agent(
+            tprompt_path, agent, executable=tprompt_bin, dry_run=dry_run
+        )
+        if tprompt_status == "unchanged":
+            summary.tprompt_unchanged += 1
+        else:
+            summary.tprompt_written += 1
+
+    if tprompt_warning_pending:
+        print(
+            "warn: tprompt not on PATH; skipping tprompt export for "
+            f"{summary.tprompt_skipped} agent(s)",
+            file=sys.stderr,
+        )
+
     removed = _remove_stale_generated_files(manifest, desired, dry_run=dry_run)
     summary.removed = removed
 
@@ -150,6 +193,7 @@ def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
                     "copilot": desired["copilot"],
                     "codex": desired["codex"],
                     "gemini": desired["gemini"],
+                    "tprompt": desired["tprompt"],
                 },
                 linked_targets=linked_targets,
             ),
@@ -162,6 +206,8 @@ def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
         f" copilot written={summary.copilot_written} unchanged={summary.copilot_unchanged};"
         f" codex written={summary.codex_written} unchanged={summary.codex_unchanged};"
         f" gemini written={summary.gemini_written} unchanged={summary.gemini_unchanged};"
+        f" tprompt written={summary.tprompt_written}"
+        f" unchanged={summary.tprompt_unchanged} skipped={summary.tprompt_skipped};"
         f" removed={summary.removed};"
         f" links created={link_summary.created} updated={link_summary.updated}"
         f" skipped={link_summary.skipped} warned={link_summary.warned}"
@@ -191,7 +237,13 @@ def _cmd_validate(source_root: Path, agent_name: str | None) -> int:
 
 def _cmd_clean(source_root: Path, dry_run: bool) -> int:
     manifest = load_manifest(source_root)
-    desired = {"claude": [], "copilot": [], "codex": [], "gemini": []}
+    desired = {
+        "claude": [],
+        "copilot": [],
+        "codex": [],
+        "gemini": [],
+        "tprompt": [],
+    }
     removed = _remove_stale_generated_files(manifest, desired, dry_run=dry_run, remove_all=True)
     link_summary, link_messages = prune_stale_links(
         manifest.linked_targets,
@@ -230,6 +282,20 @@ def _remove_stale_generated_files(
                 removed += 1
                 print(f"remove generated {path}")
     return removed
+
+
+def _check_tprompt_path_collisions(agents: list[AgentDefinition]) -> None:
+    seen: dict[str, str] = {}
+    for agent in agents:
+        if not agent.tprompt.enabled:
+            continue
+        path = str(tprompt_output_path(agent))
+        if path in seen:
+            raise DiscoveryError(
+                f"Duplicate tprompt output path {path!r} for agents "
+                f"{seen[path]!r} and {agent.name!r}; set a unique tprompt.filename."
+            )
+        seen[path] = agent.name
 
 
 def _resolve_copilot_home() -> Path:

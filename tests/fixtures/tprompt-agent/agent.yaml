@@ -1,0 +1,8 @@
+name: skill-reviewer
+description: Acts like a skill that reviews changes in the main thread.
+tprompt:
+  title: Skill Reviewer
+  tags:
+    - review
+    - skill
+  key: r

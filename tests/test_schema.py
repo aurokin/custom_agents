@@ -367,6 +367,103 @@ def test_schema_allows_underscore_agent_name(agents_home: Path) -> None:
     assert agent.name == "retrorabbit_code_reviewer"
 
 
+def test_schema_tprompt_block_enables_export(agents_home: Path) -> None:
+    source_dir = install_fixture(agents_home, "tprompt-agent")
+
+    agent = load_agent_definition(source_dir)
+
+    assert agent.tprompt.enabled is True
+    assert agent.tprompt.title == "Skill Reviewer"
+    assert agent.tprompt.tags == ["review", "skill"]
+    assert agent.tprompt.key == "r"
+    assert agent.tprompt.description is None
+    assert agent.tprompt.filename is None
+
+
+def test_schema_tprompt_absent_block_disables_export(agents_home: Path) -> None:
+    source_dir = install_fixture(agents_home, "minimal-agent")
+
+    agent = load_agent_definition(source_dir)
+
+    assert agent.tprompt.enabled is False
+    assert agent.tprompt.title is None
+
+
+def test_schema_tprompt_empty_block_enables_export(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "tprompt-empty",
+        "\n".join(
+            [
+                "name: tprompt-empty",
+                "description: Tprompt opt-in with defaults",
+                "tprompt: {}",
+            ]
+        ),
+    )
+
+    agent = load_agent_definition(source_dir)
+
+    assert agent.tprompt.enabled is True
+    assert agent.tprompt.title is None
+
+
+def test_schema_tprompt_bare_key_enables_export(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "tprompt-bare",
+        "\n".join(
+            [
+                "name: tprompt-bare",
+                "description: Bare tprompt key parses as null but still opts in",
+                "tprompt:",
+            ]
+        ),
+    )
+
+    agent = load_agent_definition(source_dir)
+
+    assert agent.tprompt.enabled is True
+    assert agent.tprompt.title is None
+
+
+def test_schema_tprompt_rejects_unknown_keys(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "tprompt-unknown",
+        "\n".join(
+            [
+                "name: tprompt-unknown",
+                "description: Invalid tprompt config",
+                "tprompt:",
+                "  title: Bad",
+                "  shortcut: x",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="Unknown tprompt keys"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_tprompt_rejects_invalid_filename(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "tprompt-bad-filename",
+        "\n".join(
+            [
+                "name: tprompt-bad-filename",
+                "description: Invalid tprompt filename",
+                "tprompt:",
+                "  filename: 'Bad Name'",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="Invalid tprompt.filename"):
+        load_agent_definition(source_dir)
+
+
 def test_repo_retrorabbit_code_reviewer_definition() -> None:
     source_dir = Path(__file__).resolve().parents[1] / "agents" / "retrorabbit_code_reviewer"
 

@@ -2,17 +2,50 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import os
+import stat
 
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover
     import tomli as tomllib
 
+import pytest
+
 import yaml
 
 from shared_agents.main import main
 from shared_agents.manifest import legacy_manifest_path, load_manifest
 from tests.conftest import install_fixture, write_agent
+
+
+def _install_fake_tprompt(
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    bin_dir = fake_home / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    prompts_dir = fake_home / ".config" / "tprompt" / "prompts"
+    script = bin_dir / "tprompt"
+    script.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"new\" ]; then\n"
+        f'  dir="{prompts_dir}"\n'
+        "  mkdir -p \"$dir\"\n"
+        "  target=\"$dir/$2.md\"\n"
+        "  if [ -e \"$target\" ]; then\n"
+        "    echo \"file already exists: $target\" >&2\n"
+        "    exit 1\n"
+        "  fi\n"
+        "  printf -- '---\\ntitle:\\ndescription:\\ntags: []\\nkey:\\nmode:\\nenter:\\n---\\n' > \"$target\"\n"
+        "  echo \"$target\"\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    return prompts_dir
 
 
 def _parse_frontmatter(document: str) -> dict:
@@ -343,6 +376,158 @@ def test_sync_can_optionally_link_canonical_agents_dir(
     assert (fake_home / ".agents" / "agents").resolve() == (agents_home / "agents").resolve()
     manifest = load_manifest(agents_home)
     assert str(fake_home / ".agents" / "agents") in manifest.linked_targets
+
+
+def test_sync_writes_tprompt_when_executable_available(
+    agents_home: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_fixture(agents_home, "tprompt-agent")
+    prompts_dir = _install_fake_tprompt(fake_home, monkeypatch)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+
+    target = prompts_dir / "skill-reviewer-ca.md"
+    assert target.exists()
+    rendered = target.read_text(encoding="utf-8")
+    frontmatter = _parse_frontmatter(rendered)
+    assert frontmatter["title"] == "Skill Reviewer"
+    assert frontmatter["tags"] == ["review", "skill"]
+    assert "Do not use subagents for this specific request." in rendered
+
+    manifest = load_manifest(agents_home)
+    assert str(target) in manifest.generated_files["tprompt"]
+
+
+def test_sync_resync_overwrites_existing_tprompt_in_place(
+    agents_home: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_fixture(agents_home, "tprompt-agent")
+    prompts_dir = _install_fake_tprompt(fake_home, monkeypatch)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+    target = prompts_dir / "skill-reviewer-ca.md"
+    assert target.exists()
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+    assert target.exists()
+
+
+def test_sync_warns_and_skips_when_tprompt_missing(
+    agents_home: Path,
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    install_fixture(agents_home, "tprompt-agent")
+    monkeypatch.setenv("PATH", str(fake_home / "nonexistent-bin"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+
+    target = fake_home / ".config" / "tprompt" / "prompts" / "skill-reviewer-ca.md"
+    assert not target.exists()
+    captured = capsys.readouterr()
+    assert "tprompt not on PATH" in captured.err
+    manifest = load_manifest(agents_home)
+    assert str(target) not in manifest.generated_files["tprompt"]
+
+
+def test_first_sync_without_binary_does_not_claim_unwritten_path(
+    agents_home: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_fixture(agents_home, "tprompt-agent")
+    monkeypatch.setenv("PATH", str(fake_home / "nonexistent-bin"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+
+    target = fake_home / ".config" / "tprompt" / "prompts" / "skill-reviewer-ca.md"
+    manifest = load_manifest(agents_home)
+    assert str(target) not in manifest.generated_files["tprompt"]
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("hand-authored content\n", encoding="utf-8")
+
+    assert main(["clean", "--source-root", str(agents_home)]) == 0
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == "hand-authored content\n"
+
+
+def test_resync_preserves_tprompt_file_when_binary_disappears(
+    agents_home: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_fixture(agents_home, "tprompt-agent")
+    prompts_dir = _install_fake_tprompt(fake_home, monkeypatch)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+    target = prompts_dir / "skill-reviewer-ca.md"
+    assert target.exists()
+    original_content = target.read_text(encoding="utf-8")
+
+    monkeypatch.setenv("PATH", str(fake_home / "nonexistent-bin"))
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == original_content
+    manifest = load_manifest(agents_home)
+    assert str(target) in manifest.generated_files["tprompt"]
+
+
+def test_sync_rejects_duplicate_tprompt_filename(
+    agents_home: Path,
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    write_agent(
+        agents_home,
+        "first-agent",
+        "\n".join(
+            [
+                "name: first-agent",
+                "description: First",
+                "tprompt:",
+                "  filename: shared-name",
+            ]
+        ),
+    )
+    write_agent(
+        agents_home,
+        "second-agent",
+        "\n".join(
+            [
+                "name: second-agent",
+                "description: Second",
+                "tprompt:",
+                "  filename: shared-name",
+            ]
+        ),
+    )
+    _install_fake_tprompt(fake_home, monkeypatch)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 1
+    captured = capsys.readouterr()
+    assert "Duplicate tprompt output path" in captured.err
+
+
+def test_clean_removes_tprompt_files(
+    agents_home: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_fixture(agents_home, "tprompt-agent")
+    prompts_dir = _install_fake_tprompt(fake_home, monkeypatch)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+    target = prompts_dir / "skill-reviewer-ca.md"
+    assert target.exists()
+
+    assert main(["clean", "--source-root", str(agents_home)]) == 0
+    assert not target.exists()
 
 
 def test_sync_uses_copilot_home_override(
