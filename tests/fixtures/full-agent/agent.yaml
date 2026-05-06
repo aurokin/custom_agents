@@ -47,6 +47,10 @@ codex:
   skills_config:
     - name: web-design-guidelines
       enabled: false
+cursor:
+  model: gpt-5.4-cursor
+  readonly: false
+  description: Cursor-specific frontend reviewer blurb
 gemini:
   tools:
     - read_file

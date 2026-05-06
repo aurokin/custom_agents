@@ -71,6 +71,7 @@ def test_sync_end_to_end(agents_home: Path, fake_home: Path) -> None:
     assert (fake_home / ".claude" / "agents" / "code-reviewer.md").exists()
     assert (fake_home / ".copilot" / "agents" / "code-reviewer.agent.md").exists()
     assert (fake_home / ".codex" / "agents" / "code-reviewer.toml").exists()
+    assert (fake_home / ".cursor" / "agents" / "code-reviewer.md").exists()
     assert (fake_home / ".gemini" / "agents" / "code-reviewer.md").exists()
     assert not (fake_home / ".agents" / "agents").exists()
     manifest = load_manifest(agents_home)
@@ -98,6 +99,11 @@ def test_sync_end_to_end(agents_home: Path, fake_home: Path) -> None:
             encoding="utf-8"
         )
     )
+    cursor_frontmatter = _parse_frontmatter(
+        (fake_home / ".cursor" / "agents" / "code-reviewer.md").read_text(
+            encoding="utf-8"
+        )
+    )
 
     assert claude_frontmatter["model"] == "opus-4.6"
     assert claude_frontmatter["effort"] == "high"
@@ -106,6 +112,8 @@ def test_sync_end_to_end(agents_home: Path, fake_home: Path) -> None:
     assert codex_document["model_reasoning_effort"] == "high"
     assert "tools" not in gemini_frontmatter
     assert "model" not in gemini_frontmatter
+    assert cursor_frontmatter["readonly"] is True
+    assert "model" not in cursor_frontmatter
 
 
 def test_sync_end_to_end_supports_explicit_floating_model_strategy(
@@ -262,6 +270,7 @@ def test_clean_removes_manifest_owned_files(agents_home: Path, fake_home: Path) 
     assert not (fake_home / ".claude" / "agents" / "code-reviewer.md").exists()
     assert not (fake_home / ".copilot" / "agents" / "code-reviewer.agent.md").exists()
     assert not (fake_home / ".codex" / "agents" / "code-reviewer.toml").exists()
+    assert not (fake_home / ".cursor" / "agents" / "code-reviewer.md").exists()
     assert not (fake_home / ".gemini" / "agents" / "code-reviewer.md").exists()
     assert load_manifest(agents_home) == load_manifest(agents_home).empty()
 
@@ -326,6 +335,38 @@ def test_clean_supports_legacy_manifest_without_gemini_key(
     assert not legacy_path.exists()
 
 
+def test_sync_supports_legacy_manifest_without_cursor_key(
+    agents_home: Path, fake_home: Path
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+    legacy_path = legacy_manifest_path(agents_home)
+    stale_cursor_path = fake_home / ".cursor" / "agents" / "stale-reviewer.md"
+    stale_cursor_path.parent.mkdir(parents=True, exist_ok=True)
+    stale_cursor_path.write_text(
+        "---\nname: stale\n---\n\nstale\n", encoding="utf-8"
+    )
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "generated_files": {
+                    "claude": [],
+                    "copilot": [],
+                    "codex": [],
+                    "gemini": [],
+                },
+                "linked_targets": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+    assert (fake_home / ".cursor" / "agents" / "code-reviewer.md").exists()
+    assert stale_cursor_path.exists()
+    assert not legacy_path.exists()
+
+
 def test_sync_switches_source_root_and_removes_previous_outputs(
     tmp_path: Path, fake_home: Path
 ) -> None:
@@ -341,6 +382,7 @@ def test_sync_switches_source_root_and_removes_previous_outputs(
     assert (fake_home / ".claude" / "agents" / "alpha.md").exists()
     assert (fake_home / ".copilot" / "agents" / "alpha.agent.md").exists()
     assert (fake_home / ".codex" / "agents" / "alpha.toml").exists()
+    assert (fake_home / ".cursor" / "agents" / "alpha.md").exists()
     assert (fake_home / ".gemini" / "agents" / "alpha.md").exists()
 
     assert main(["sync", "--source-root", str(second_home)]) == 0
@@ -348,10 +390,12 @@ def test_sync_switches_source_root_and_removes_previous_outputs(
     assert not (fake_home / ".claude" / "agents" / "alpha.md").exists()
     assert not (fake_home / ".copilot" / "agents" / "alpha.agent.md").exists()
     assert not (fake_home / ".codex" / "agents" / "alpha.toml").exists()
+    assert not (fake_home / ".cursor" / "agents" / "alpha.md").exists()
     assert not (fake_home / ".gemini" / "agents" / "alpha.md").exists()
     assert (fake_home / ".claude" / "agents" / "beta.md").exists()
     assert (fake_home / ".copilot" / "agents" / "beta.agent.md").exists()
     assert (fake_home / ".codex" / "agents" / "beta.toml").exists()
+    assert (fake_home / ".cursor" / "agents" / "beta.md").exists()
     assert (fake_home / ".gemini" / "agents" / "beta.md").exists()
 
 

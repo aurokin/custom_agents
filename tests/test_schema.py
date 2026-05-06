@@ -367,6 +367,83 @@ def test_schema_allows_underscore_agent_name(agents_home: Path) -> None:
     assert agent.name == "retrorabbit_code_reviewer"
 
 
+def test_schema_cursor_block_parses(agents_home: Path) -> None:
+    source_dir = install_fixture(agents_home, "full-agent")
+
+    agent = load_agent_definition(source_dir)
+
+    assert agent.cursor.model == "gpt-5.4-cursor"
+    assert agent.cursor.readonly is False
+    assert agent.cursor.description == "Cursor-specific frontend reviewer blurb"
+    assert agent.resolved_cursor_readonly() is False
+
+
+def test_schema_cursor_readonly_derives_from_sandbox(agents_home: Path) -> None:
+    source_dir = install_fixture(agents_home, "minimal-agent")
+
+    agent = load_agent_definition(source_dir)
+
+    assert agent.cursor.model is None
+    assert agent.cursor.readonly is None
+    assert agent.cursor.description is None
+    assert agent.resolved_cursor_readonly() is True
+
+
+def test_schema_cursor_readonly_omitted_for_workspace_write(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "cursor-workspace-write",
+        "\n".join(
+            [
+                "name: workspace-cursor",
+                "description: Workspace-write agent",
+                "defaults:",
+                "  sandbox: workspace-write",
+            ]
+        ),
+    )
+
+    agent = load_agent_definition(source_dir)
+
+    assert agent.resolved_cursor_readonly() is None
+
+
+def test_schema_cursor_rejects_unknown_keys(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "bad-cursor",
+        "\n".join(
+            [
+                "name: bad-cursor",
+                "description: Invalid cursor config",
+                "cursor:",
+                "  scope: project",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="Unknown cursor keys"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_cursor_rejects_non_bool_readonly(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "bad-cursor-readonly",
+        "\n".join(
+            [
+                "name: bad-cursor-readonly",
+                "description: Invalid readonly type",
+                "cursor:",
+                "  readonly: yes-please",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="readonly"):
+        load_agent_definition(source_dir)
+
+
 def test_schema_tprompt_block_enables_export(agents_home: Path) -> None:
     source_dir = install_fixture(agents_home, "tprompt-agent")
 
