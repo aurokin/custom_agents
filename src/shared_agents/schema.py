@@ -86,6 +86,13 @@ class GeminiConfig:
 
 
 @dataclass(frozen=True)
+class CursorConfig:
+    model: str | None = None
+    readonly: bool | None = None
+    description: str | None = None
+
+
+@dataclass(frozen=True)
 class TpromptConfig:
     enabled: bool = False
     title: str | None = None
@@ -109,8 +116,16 @@ class AgentDefinition:
     claude: ClaudeConfig
     codex: CodexConfig
     copilot: CopilotConfig
+    cursor: CursorConfig
     gemini: GeminiConfig
     tprompt: TpromptConfig
+
+    def resolved_cursor_readonly(self) -> bool | None:
+        if self.cursor.readonly is not None:
+            return self.cursor.readonly
+        if self.sandbox == "read-only":
+            return True
+        return None
 
     @property
     def output_name(self) -> str:
@@ -317,6 +332,19 @@ def load_agent_definition(source_dir: Path) -> AgentDefinition:
         )
     _validate_copilot_config(copilot, agent_yaml_path)
 
+    cursor_raw = _optional_mapping(raw, "cursor", agent_yaml_path)
+    cursor_unknown = set(cursor_raw) - {"model", "readonly", "description"}
+    if cursor_unknown:
+        unknown_keys = ", ".join(sorted(cursor_unknown))
+        raise SchemaError(
+            f"Unknown cursor keys in {agent_yaml_path}: {unknown_keys}"
+        )
+    cursor = CursorConfig(
+        model=_optional_str(cursor_raw, "model", agent_yaml_path),
+        readonly=_optional_bool(cursor_raw, "readonly", agent_yaml_path),
+        description=_optional_str(cursor_raw, "description", agent_yaml_path),
+    )
+
     tprompt_enabled = "tprompt" in raw
     tprompt_raw = _optional_mapping(raw, "tprompt", agent_yaml_path)
     tprompt_unknown = set(tprompt_raw) - {
@@ -382,6 +410,7 @@ def load_agent_definition(source_dir: Path) -> AgentDefinition:
         "claude",
         "codex",
         "copilot",
+        "cursor",
         "gemini",
         "tprompt",
     }
@@ -400,6 +429,7 @@ def load_agent_definition(source_dir: Path) -> AgentDefinition:
         claude=claude,
         codex=codex,
         copilot=copilot,
+        cursor=cursor,
         gemini=gemini,
         tprompt=tprompt,
     )

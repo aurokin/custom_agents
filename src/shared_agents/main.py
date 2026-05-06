@@ -10,6 +10,7 @@ from .discover import DiscoveryError, discover_agents, resolve_source_root
 from .generators.claude import write_claude_agent
 from .generators.copilot import write_copilot_agent
 from .generators.codex import write_codex_agent
+from .generators.cursor import write_cursor_agent
 from .generators.gemini import write_gemini_agent
 from .generators.tprompt import (
     tprompt_executable,
@@ -29,6 +30,8 @@ class SyncSummary:
     copilot_unchanged: int = 0
     codex_written: int = 0
     codex_unchanged: int = 0
+    cursor_written: int = 0
+    cursor_unchanged: int = 0
     gemini_written: int = 0
     gemini_unchanged: int = 0
     tprompt_written: int = 0
@@ -98,10 +101,12 @@ def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
         "claude": [],
         "copilot": [],
         "codex": [],
+        "cursor": [],
         "gemini": [],
         "tprompt": [],
     }
     copilot_home = _resolve_copilot_home()
+    cursor_home = Path.home() / ".cursor"
     gemini_home = Path.home() / ".gemini"
     tprompt_bin = tprompt_executable()
     tprompt_warning_pending = any(agent.tprompt.enabled for agent in agents) and (
@@ -112,10 +117,12 @@ def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
         claude_path = Path.home() / ".claude" / "agents" / f"{agent.output_name}.md"
         copilot_path = copilot_home / "agents" / f"{agent.output_name}.agent.md"
         codex_path = Path.home() / ".codex" / "agents" / f"{agent.output_name}.toml"
+        cursor_path = cursor_home / "agents" / f"{agent.output_name}.md"
         gemini_path = gemini_home / "agents" / f"{agent.output_name}.md"
         desired["claude"].append(str(claude_path))
         desired["copilot"].append(str(copilot_path))
         desired["codex"].append(str(codex_path))
+        desired["cursor"].append(str(cursor_path))
         desired["gemini"].append(str(gemini_path))
 
         claude_status = write_claude_agent(claude_path, agent, dry_run=dry_run)
@@ -135,6 +142,12 @@ def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
             summary.codex_unchanged += 1
         else:
             summary.codex_written += 1
+
+        cursor_status = write_cursor_agent(cursor_path, agent, dry_run=dry_run)
+        if cursor_status == "unchanged":
+            summary.cursor_unchanged += 1
+        else:
+            summary.cursor_written += 1
 
         gemini_status = write_gemini_agent(gemini_path, agent, dry_run=dry_run)
         if gemini_status == "unchanged":
@@ -192,6 +205,7 @@ def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
                     "claude": desired["claude"],
                     "copilot": desired["copilot"],
                     "codex": desired["codex"],
+                    "cursor": desired["cursor"],
                     "gemini": desired["gemini"],
                     "tprompt": desired["tprompt"],
                 },
@@ -205,6 +219,7 @@ def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
         f" claude written={summary.claude_written} unchanged={summary.claude_unchanged};"
         f" copilot written={summary.copilot_written} unchanged={summary.copilot_unchanged};"
         f" codex written={summary.codex_written} unchanged={summary.codex_unchanged};"
+        f" cursor written={summary.cursor_written} unchanged={summary.cursor_unchanged};"
         f" gemini written={summary.gemini_written} unchanged={summary.gemini_unchanged};"
         f" tprompt written={summary.tprompt_written}"
         f" unchanged={summary.tprompt_unchanged} skipped={summary.tprompt_skipped};"
@@ -241,6 +256,7 @@ def _cmd_clean(source_root: Path, dry_run: bool) -> int:
         "claude": [],
         "copilot": [],
         "codex": [],
+        "cursor": [],
         "gemini": [],
         "tprompt": [],
     }

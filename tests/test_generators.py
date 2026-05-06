@@ -12,6 +12,7 @@ import yaml
 from shared_agents.generators.claude import build_claude_frontmatter, render_claude_agent
 from shared_agents.generators.copilot import build_copilot_frontmatter, render_copilot_agent
 from shared_agents.generators.codex import build_codex_document, render_codex_agent
+from shared_agents.generators.cursor import build_cursor_frontmatter, render_cursor_agent
 from shared_agents.generators.gemini import build_gemini_frontmatter, render_gemini_agent
 from shared_agents.generators.tprompt import (
     SUBAGENT_FOOTER,
@@ -374,6 +375,66 @@ def test_codex_sandbox_mapping(agents_home: Path) -> None:
     assert parsed["sandbox_mode"] == "danger-full-access"
 
 
+def test_cursor_generator_minimal_emits_derived_readonly(agents_home: Path) -> None:
+    agent = load_agent_definition(install_fixture(agents_home, "minimal-agent"))
+
+    rendered = render_cursor_agent(agent)
+    frontmatter = _parse_frontmatter(rendered)
+
+    assert frontmatter == {
+        "name": "code-reviewer",
+        "description": "Reviews code for correctness and risk.",
+        "readonly": True,
+    }
+    assert "model" not in frontmatter
+    assert "focused code reviewer" in rendered
+
+
+def test_cursor_generator_full(agents_home: Path) -> None:
+    agent = load_agent_definition(install_fixture(agents_home, "full-agent"))
+
+    rendered = render_cursor_agent(agent)
+    frontmatter = _parse_frontmatter(rendered)
+
+    assert frontmatter == {
+        "name": "frontend-reviewer",
+        "description": "Cursor-specific frontend reviewer blurb",
+        "model": "gpt-5.4-cursor",
+        "readonly": False,
+    }
+
+
+def test_cursor_generator_omits_readonly_for_workspace_write(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "cursor-workspace-write",
+        "\n".join(
+            [
+                "name: workspace-cursor",
+                "description: Workspace-write agent",
+                "defaults:",
+                "  sandbox: workspace-write",
+            ]
+        ),
+    )
+    agent = load_agent_definition(source_dir)
+
+    frontmatter = _parse_frontmatter(render_cursor_agent(agent))
+
+    assert frontmatter == {
+        "name": "workspace-cursor",
+        "description": "Workspace-write agent",
+    }
+
+
+def test_cursor_generator_roundtrip(agents_home: Path) -> None:
+    agent = load_agent_definition(install_fixture(agents_home, "full-agent"))
+
+    assert build_cursor_frontmatter(agent) == _parse_frontmatter(
+        render_cursor_agent(agent)
+    )
+
+
 def test_tprompt_generator_renders_explicit_fields(agents_home: Path) -> None:
     agent = load_agent_definition(install_fixture(agents_home, "tprompt-agent"))
 
@@ -448,6 +509,7 @@ def test_repo_retrorabbit_renders_as_floating_agent() -> None:
     claude_frontmatter = _parse_frontmatter(render_claude_agent(agent))
     copilot_frontmatter = _parse_frontmatter(render_copilot_agent(agent))
     codex_document = tomllib.loads(render_codex_agent(agent))
+    cursor_frontmatter = _parse_frontmatter(render_cursor_agent(agent))
     gemini_frontmatter = _parse_frontmatter(render_gemini_agent(agent))
 
     assert "model" not in claude_frontmatter
@@ -455,6 +517,8 @@ def test_repo_retrorabbit_renders_as_floating_agent() -> None:
     assert "model" not in copilot_frontmatter
     assert "model" not in codex_document
     assert "model_reasoning_effort" not in codex_document
+    assert "model" not in cursor_frontmatter
+    assert cursor_frontmatter["readonly"] is True
     assert gemini_frontmatter["tools"] == ["read_file", "grep_search"]
     assert gemini_frontmatter["max_turns"] == 16
     assert "model" not in gemini_frontmatter

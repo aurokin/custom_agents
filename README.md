@@ -1,7 +1,7 @@
 # Custom Agents
 
 `custom_agents` is a small Python CLI for generating consumer-native agent
-definitions for Claude Code, GitHub Copilot, Codex, and Gemini CLI from a shared source tree.
+definitions for Claude Code, GitHub Copilot, Codex, Cursor, and Gemini CLI from a shared source tree.
 
 ## Install
 
@@ -36,6 +36,7 @@ shared-agents clean
 - Claude Code: `~/.claude/agents/<name>.md`
 - GitHub Copilot: `~/.copilot/agents/<name>.agent.md`
 - Codex: `~/.codex/agents/<name>.toml`
+- Cursor: `~/.cursor/agents/<name>.md`
 - Gemini CLI: `~/.gemini/agents/<name>.md`
 - Optional compatibility link: `<source-root>/agents` symlinked to `~/.agents/agents` only when `--link-canonical` is used
 
@@ -64,6 +65,13 @@ shared-agents clean
   `COPILOT_HOME` is set.
 - Claude output is generated as markdown files with YAML frontmatter under
   `~/.claude/agents/`.
+- Cursor output is generated as markdown subagent files under
+  `~/.cursor/agents/`. This generator omits Cursor `model` unless
+  `cursor.model` is set explicitly in `agent.yaml`; Cursor handles its
+  own model defaults. `cursor.readonly` overrides the derived value;
+  otherwise a shared sandbox of `read-only` maps to `readonly: true`
+  and other sandboxes leave `readonly` unset. Cursor Skills and Cursor
+  Rules are not in scope here; only native subagent export is supported.
 - Source root resolution order is: `--source-root`, current working directory
   when it contains `agents/`, `AGENTS_HOME`, then legacy fallback `~/.agents`.
 - The canonical `~/.agents/agents` linker is opt-in via `--link-canonical`.
