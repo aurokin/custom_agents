@@ -7,7 +7,14 @@ definitions for Claude Code, GitHub Copilot, Codex, Cursor, and Gemini CLI from 
 
 ```bash
 python3 -m pip install -e '.[dev]'
+shared-agents init
 ```
+
+`shared-agents init` materializes each agent's `agent.yaml.example` into a
+sibling `agent.yaml`. The `.example` files are the canonical committed
+source; the materialized `agent.yaml` is gitignored so personal harness
+overrides stay local. `init` is idempotent — re-running it skips any
+`agent.yaml` that already exists, so local edits are never clobbered.
 
 ## Canonical Source Layout
 
@@ -16,7 +23,8 @@ python3 -m pip install -e '.[dev]'
 ├── AGENTS.md
 ├── agents/
 │   └── code-reviewer/
-│       ├── agent.yaml
+│       ├── agent.yaml.example   # canonical, committed
+│       ├── agent.yaml            # gitignored, created by `shared-agents init`
 │       └── instructions.md
 └── skills/
 ```
@@ -24,12 +32,77 @@ python3 -m pip install -e '.[dev]'
 ## Commands
 
 ```bash
-shared-agents sync
+shared-agents init                              # bootstrap agent.yaml from .example
+shared-agents sync                              # all agents × all available harnesses
 shared-agents sync --link-canonical
 shared-agents list
 shared-agents validate
 shared-agents clean
 ```
+
+### Selection flags (on `sync`, `list`, `clean`)
+
+All four list flags accept comma-separated values and may also be
+repeated; the values accumulate.
+
+| Flag | Effect |
+|------|--------|
+| `--agents A,B` | Only operate on the listed agents. |
+| `--exclude-agents A,B` | Skip the listed agents. |
+| `--harness H,...` | Only operate on the listed harnesses. Keywords: `claude`, `codex`, `copilot`, `cursor`, `gemini`, `tprompt`. |
+| `--exclude-harness H,...` | Skip the listed harnesses. |
+| `--no-tprompt` | Exclude tprompt entirely. On `sync` this means don't write tprompt outputs; on `clean` it means leave existing tprompt entries in place. |
+
+Examples:
+
+```bash
+shared-agents sync --agents code-reviewer       # one agent, all harnesses
+shared-agents sync --harness claude,codex       # all agents, two harnesses
+shared-agents sync --exclude-harness gemini     # skip gemini for everyone
+shared-agents sync --agents code-reviewer --harness claude
+shared-agents clean --agents code-reviewer      # remove only this agent's outputs
+shared-agents clean --harness gemini            # remove only gemini outputs
+```
+
+### Per-agent harness preferences
+
+Each `agent.yaml` may declare a top-level `harness:` block with either
+`include` *or* `exclude` (setting both is a schema error):
+
+```yaml
+name: code-reviewer
+harness:
+  exclude: [tprompt, gemini]
+  # or:
+  # include: [claude, codex]
+```
+
+Because `agent.yaml` is gitignored, this is the right place to encode
+personal harness preferences for an agent without changing the canonical
+`.example` definition.
+
+### Selection precedence
+
+The final per-agent harness set is:
+
+```
+base = available harnesses (excludes tprompt when its binary is not on PATH)
+if --harness given:           base ∩= --harness
+base −= --exclude-harness
+if agent has harness.include: base ∩= agent.harness.include
+base −= agent.harness.exclude
+if --no-tprompt:              base.discard("tprompt")
+if agent did not opt in:      base.discard("tprompt")
+```
+
+Scoped operations only touch the in-scope subset of the manifest:
+
+* `sync --harness claude` leaves codex/copilot/cursor/gemini files and
+  manifest entries untouched.
+* `clean --agents X` removes only X's outputs and preserves every other
+  agent's manifest entries and on-disk files.
+* The canonical `~/.agents/agents` symlink is only pruned by an unscoped
+  `clean`.
 
 ## Outputs
 
@@ -39,6 +112,15 @@ shared-agents clean
 - Cursor: `~/.cursor/agents/<name>.md`
 - Gemini CLI: `~/.gemini/agents/<name>.md`
 - Optional compatibility link: `<source-root>/agents` symlinked to `~/.agents/agents` only when `--link-canonical` is used
+
+## Manifest
+
+State is tracked in `~/.local/state/custom_agents/.shared-agents-manifest.json`
+(or `$XDG_STATE_HOME/custom_agents/...`). Cleanup is manifest-based so the
+tool only removes files it owns. The manifest is v2: each entry is
+`{agent, path}` per harness. v1 manifests are auto-migrated on first load
+with a one-time stderr line of the form
+`note: upgrading manifest at <path> from v1 to v2`.
 
 ## Notes
 
