@@ -19,7 +19,7 @@ from .generators.tprompt import (
     write_tprompt_agent,
 )
 from .harnesses import HARNESS_KEYWORDS, available_harnesses
-from .linker import prune_stale_links, sync_links
+from .linker import LinkSummary, prune_stale_links, sync_links
 from .manifest import (
     Manifest,
     ManifestEntry,
@@ -115,7 +115,11 @@ def _add_selection_flags(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--no-tprompt",
         action="store_true",
-        help="Force-disable tprompt for this run regardless of schema/availability.",
+        help=(
+            "Exclude tprompt from this run. "
+            "On sync: skip writing tprompt outputs. "
+            "On clean: leave existing tprompt entries in place."
+        ),
     )
 
 
@@ -150,6 +154,7 @@ def build_parser() -> argparse.ArgumentParser:
     clean = subparsers.add_parser("clean", help="Remove files owned by this tool", allow_abbrev=False)
     clean.add_argument("--dry-run", action="store_true")
     clean.add_argument("--source-root", "--agents-home", dest="source_root", type=Path)
+    _add_selection_flags(clean)
 
     return parser
 
@@ -172,7 +177,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "validate":
             return _cmd_validate(source_root, args.agent_name)
         if args.command == "clean":
-            return _cmd_clean(source_root, dry_run=args.dry_run)
+            return _cmd_clean(
+                source_root,
+                dry_run=args.dry_run,
+                filters=_build_filters(args),
+            )
     except DiscoveryError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -217,7 +226,11 @@ def _cmd_sync(
         agents, filters, available_harnesses()
     )
 
-    scope = _build_scope(filters, agents) if filters.is_active() else None
+    scope = (
+        _build_scope(filters, {agent.name for agent in agents})
+        if filters.is_active()
+        else None
+    )
 
     for selection in selections:
         for harness, writer in writers.items():
@@ -339,25 +352,127 @@ def _cmd_validate(source_root: Path, agent_name: str | None) -> int:
     return 0
 
 
-def _cmd_clean(source_root: Path, dry_run: bool) -> int:
+def _cmd_clean(
+    source_root: Path,
+    dry_run: bool,
+    filters: CLIFilters | None = None,
+) -> int:
+    filters = filters or CLIFilters()
     manifest = load_manifest(source_root)
     desired = _empty_desired()
-    removed = _remove_stale_generated_files(manifest, desired, dry_run=dry_run, remove_all=True)
-    link_summary, link_messages = prune_stale_links(
-        manifest.linked_targets,
-        dry_run=dry_run,
+
+    if filters.is_active():
+        _validate_clean_filters(filters, manifest, source_root)
+        agent_universe = _manifest_agents(manifest)
+        try:
+            discovered = discover_agents(source_root)
+        except DiscoveryError as exc:
+            print(
+                f"warn: agent discovery failed during clean: {exc}; "
+                "using manifest-only universe",
+                file=sys.stderr,
+            )
+            discovered = []
+        agent_universe.update(agent.name for agent in discovered)
+        scope: _Scope | None = _build_scope(filters, agent_universe)
+        _warn_about_ghost_entries(manifest, scope)
+    else:
+        scope = None
+
+    removed = _remove_stale_generated_files(
+        manifest, desired, scope=scope, dry_run=dry_run, remove_all=True
     )
+
+    if filters.is_active():
+        link_summary = LinkSummary()
+        link_messages: list[str] = []
+    else:
+        link_summary, link_messages = prune_stale_links(
+            manifest.linked_targets,
+            dry_run=dry_run,
+        )
     for message in link_messages:
         if message.startswith("remove managed") or message.startswith("warn"):
             print(message)
+
     if not dry_run:
-        save_manifest(source_root, Manifest.empty())
+        if scope is None:
+            save_manifest(source_root, Manifest.empty())
+        else:
+            preserved = _merge_out_of_scope_entries(manifest, desired, scope)
+            save_manifest(
+                source_root,
+                Manifest(
+                    generated_files=preserved,
+                    linked_targets=manifest.linked_targets,
+                ),
+            )
         remove_legacy_manifest(source_root)
     print(
         f"clean: removed={removed} managed-links={link_summary.removed} "
         f"warned={link_summary.warned}"
     )
     return 0
+
+
+def _manifest_agents(manifest: Manifest) -> set[str]:
+    agents: set[str] = set()
+    for entries in manifest.generated_files.values():
+        for entry in entries:
+            if entry.agent:
+                agents.add(entry.agent)
+    return agents
+
+
+def _validate_clean_filters(
+    filters: CLIFilters, manifest: Manifest, source_root: Path
+) -> None:
+    for keywords, label in (
+        (filters.include_harness, "harness filter include"),
+        (filters.exclude_harness, "harness filter exclude"),
+    ):
+        if not keywords:
+            continue
+        unknown = sorted(set(keywords) - set(HARNESS_KEYWORDS))
+        if unknown:
+            allowed = ", ".join(HARNESS_KEYWORDS)
+            raise ValueError(
+                f"Unknown harness keyword(s) in {label}: {', '.join(unknown)} "
+                f"(allowed: {allowed})"
+            )
+    requested_agents = (filters.include_agents or frozenset()) | filters.exclude_agents
+    if not requested_agents:
+        return
+    universe = _manifest_agents(manifest)
+    try:
+        universe.update(agent.name for agent in discover_agents(source_root))
+    except DiscoveryError:
+        pass
+    unknown_agents = sorted(requested_agents - universe)
+    if unknown_agents:
+        raise ValueError(
+            f"Unknown agent name(s): {', '.join(unknown_agents)}"
+        )
+
+
+def _warn_about_ghost_entries(manifest: Manifest, scope: _Scope) -> None:
+    if not scope.agent_filter_active:
+        return
+    ghost_count = sum(
+        1
+        for entries in manifest.generated_files.values()
+        for entry in entries
+        if not entry.agent
+    )
+    if ghost_count:
+        print(
+            f"note: {ghost_count} manifest entries lack agent attribution and "
+            "were skipped; run an unscoped sync to re-attribute or unscoped "
+            "clean to remove them.",
+            file=sys.stderr,
+        )
+
+
 
 
 @dataclass(frozen=True)
@@ -374,11 +489,11 @@ class _Scope:
         return entry.agent in self.agents
 
 
-def _build_scope(filters: CLIFilters, agents: list[AgentDefinition]) -> _Scope:
-    all_agents = {agent.name for agent in agents}
-    selected_agents = set(all_agents)
+def _build_scope(filters: CLIFilters, agent_universe: set[str]) -> _Scope:
     if filters.include_agents is not None:
-        selected_agents &= filters.include_agents
+        selected_agents = set(filters.include_agents)
+    else:
+        selected_agents = set(agent_universe)
     selected_agents -= filters.exclude_agents
 
     selected_harnesses = set(HARNESS_KEYWORDS)

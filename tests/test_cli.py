@@ -665,6 +665,189 @@ def test_sync_default_output_byte_stable_regression(
         )
 
 
+def test_clean_rejects_unknown_harness(
+    agents_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+
+    assert (
+        main(
+            [
+                "clean",
+                "--source-root",
+                str(agents_home),
+                "--harness",
+                "hermes",
+            ]
+        )
+        == 1
+    )
+    err = capsys.readouterr().err
+    assert "Unknown harness keyword" in err
+
+
+def test_clean_rejects_unknown_agent_name(
+    agents_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+
+    assert (
+        main(
+            [
+                "clean",
+                "--source-root",
+                str(agents_home),
+                "--agents",
+                "ghost",
+            ]
+        )
+        == 1
+    )
+    err = capsys.readouterr().err
+    assert "Unknown agent name" in err
+
+
+def test_scoped_clean_warns_on_v1_ghost_entries(
+    agents_home: Path, fake_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+    ghost_path = fake_home / ".claude" / "agents" / "ghost.md"
+    ghost_path.parent.mkdir(parents=True, exist_ok=True)
+    ghost_path.write_text("ghost\n", encoding="utf-8")
+    primary = manifest_path(agents_home)
+    primary.parent.mkdir(parents=True, exist_ok=True)
+    primary.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "generated_files": {"claude": [str(ghost_path)]},
+                "linked_targets": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "clean",
+                "--source-root",
+                str(agents_home),
+                "--agents",
+                "code-reviewer",
+            ]
+        )
+        == 0
+    )
+
+    err = capsys.readouterr().err
+    assert "lack agent attribution" in err
+    assert ghost_path.exists(), "ghost path with unknown attribution must survive scoped clean"
+
+
+def test_scoped_clean_harness_preserves_other_harness_files(
+    agents_home: Path, fake_home: Path
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+    claude_target = fake_home / ".claude" / "agents" / "code-reviewer.md"
+    gemini_target = fake_home / ".gemini" / "agents" / "code-reviewer.md"
+    assert claude_target.exists() and gemini_target.exists()
+
+    assert (
+        main(
+            [
+                "clean",
+                "--source-root",
+                str(agents_home),
+                "--harness",
+                "gemini",
+            ]
+        )
+        == 0
+    )
+
+    assert claude_target.exists(), "scoped clean must not remove out-of-scope files"
+    assert not gemini_target.exists()
+    manifest = load_manifest(agents_home)
+    assert str(claude_target) in manifest.paths("claude")
+    assert manifest.paths("gemini") == []
+
+
+def test_scoped_clean_agents_preserves_other_agents(
+    agents_home: Path, fake_home: Path
+) -> None:
+    write_agent(agents_home, "alpha", "name: alpha\ndescription: Alpha\n")
+    write_agent(agents_home, "beta", "name: beta\ndescription: Beta\n")
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+    alpha_target = fake_home / ".claude" / "agents" / "alpha.md"
+    beta_target = fake_home / ".claude" / "agents" / "beta.md"
+    assert alpha_target.exists() and beta_target.exists()
+
+    assert (
+        main(
+            [
+                "clean",
+                "--source-root",
+                str(agents_home),
+                "--agents",
+                "alpha",
+            ]
+        )
+        == 0
+    )
+
+    assert not alpha_target.exists()
+    assert beta_target.exists()
+    manifest = load_manifest(agents_home)
+    assert str(beta_target) in manifest.paths("claude")
+    assert str(alpha_target) not in manifest.paths("claude")
+
+
+def test_scoped_clean_leaves_links_alone(
+    agents_home: Path, fake_home: Path
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+    assert (
+        main(["sync", "--source-root", str(agents_home), "--link-canonical"])
+        == 0
+    )
+    canonical_link = fake_home / ".agents" / "agents"
+    assert canonical_link.is_symlink()
+
+    assert (
+        main(
+            [
+                "clean",
+                "--source-root",
+                str(agents_home),
+                "--harness",
+                "gemini",
+            ]
+        )
+        == 0
+    )
+
+    assert canonical_link.is_symlink(), "scoped clean must not prune managed links"
+
+
+def test_unscoped_clean_still_prunes_links(
+    agents_home: Path, fake_home: Path
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+    assert (
+        main(["sync", "--source-root", str(agents_home), "--link-canonical"])
+        == 0
+    )
+    canonical_link = fake_home / ".agents" / "agents"
+    assert canonical_link.is_symlink()
+
+    assert main(["clean", "--source-root", str(agents_home)]) == 0
+
+    assert not canonical_link.is_symlink()
+
+
 def test_scoped_sync_after_v1_migration_dedupes_manifest_entries(
     agents_home: Path, fake_home: Path
 ) -> None:
