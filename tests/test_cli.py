@@ -665,6 +665,288 @@ def test_sync_default_output_byte_stable_regression(
         )
 
 
+def test_scoped_sync_after_v1_migration_dedupes_manifest_entries(
+    agents_home: Path, fake_home: Path
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+    claude_target = fake_home / ".claude" / "agents" / "code-reviewer.md"
+    claude_target.parent.mkdir(parents=True, exist_ok=True)
+    claude_target.write_text("stale\n", encoding="utf-8")
+    primary = manifest_path(agents_home)
+    primary.parent.mkdir(parents=True, exist_ok=True)
+    primary.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "generated_files": {
+                    "claude": [str(claude_target)],
+                    "copilot": [],
+                    "codex": [],
+                    "cursor": [],
+                    "gemini": [],
+                    "tprompt": [],
+                },
+                "linked_targets": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                "sync",
+                "--source-root",
+                str(agents_home),
+                "--agents",
+                "code-reviewer",
+            ]
+        )
+        == 0
+    )
+
+    persisted = json.loads(primary.read_text(encoding="utf-8"))
+    claude_entries = persisted["generated_files"]["claude"]
+    same_path = [e for e in claude_entries if e["path"] == str(claude_target)]
+    assert len(same_path) == 1, f"expected single entry, got {claude_entries}"
+    assert same_path[0]["agent"] == "code-reviewer"
+
+
+def test_sync_agents_home_alias_still_routes_to_source_root(
+    agents_home: Path, fake_home: Path
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+
+    assert main(["sync", "--agents-home", str(agents_home)]) == 0
+
+    assert (fake_home / ".claude" / "agents" / "code-reviewer.md").exists()
+
+
+def test_sync_rejects_empty_csv_value(
+    agents_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+
+    with pytest.raises(SystemExit):
+        main(["sync", "--source-root", str(agents_home), "--agents", ""])
+
+    err = capsys.readouterr().err
+    assert "requires at least one non-empty value" in err
+
+
+def test_scoped_sync_preserves_out_of_scope_outputs(
+    agents_home: Path, fake_home: Path
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+    codex_target = fake_home / ".codex" / "agents" / "code-reviewer.toml"
+    gemini_target = fake_home / ".gemini" / "agents" / "code-reviewer.md"
+    assert codex_target.exists()
+    assert gemini_target.exists()
+
+    assert (
+        main(
+            [
+                "sync",
+                "--source-root",
+                str(agents_home),
+                "--harness",
+                "claude",
+            ]
+        )
+        == 0
+    )
+
+    assert codex_target.exists(), "scoped sync must not delete out-of-scope output"
+    assert gemini_target.exists(), "scoped sync must not delete out-of-scope output"
+    manifest = load_manifest(agents_home)
+    assert str(codex_target) in manifest.paths("codex")
+    assert str(gemini_target) in manifest.paths("gemini")
+
+
+def test_scoped_sync_by_agent_preserves_other_agents_outputs(
+    agents_home: Path, fake_home: Path
+) -> None:
+    write_agent(agents_home, "alpha", "name: alpha\ndescription: Alpha\n")
+    write_agent(agents_home, "beta", "name: beta\ndescription: Beta\n")
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+    alpha_target = fake_home / ".claude" / "agents" / "alpha.md"
+    beta_target = fake_home / ".claude" / "agents" / "beta.md"
+    assert alpha_target.exists() and beta_target.exists()
+
+    assert (
+        main(
+            [
+                "sync",
+                "--source-root",
+                str(agents_home),
+                "--agents",
+                "alpha",
+            ]
+        )
+        == 0
+    )
+
+    assert alpha_target.exists()
+    assert beta_target.exists(), "scoped sync must not delete other agents' outputs"
+
+
+def test_sync_with_include_agents_writes_only_selected(
+    agents_home: Path, fake_home: Path
+) -> None:
+    write_agent(agents_home, "alpha", "name: alpha\ndescription: Alpha\n")
+    write_agent(agents_home, "beta", "name: beta\ndescription: Beta\n")
+
+    assert main(["sync", "--source-root", str(agents_home), "--agents", "alpha"]) == 0
+
+    assert (fake_home / ".claude" / "agents" / "alpha.md").exists()
+    assert not (fake_home / ".claude" / "agents" / "beta.md").exists()
+
+
+def test_sync_with_include_harness_writes_only_selected(
+    agents_home: Path, fake_home: Path
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+
+    assert (
+        main(
+            [
+                "sync",
+                "--source-root",
+                str(agents_home),
+                "--harness",
+                "claude,codex",
+            ]
+        )
+        == 0
+    )
+
+    assert (fake_home / ".claude" / "agents" / "code-reviewer.md").exists()
+    assert (fake_home / ".codex" / "agents" / "code-reviewer.toml").exists()
+    assert not (fake_home / ".copilot" / "agents" / "code-reviewer.agent.md").exists()
+    assert not (fake_home / ".cursor" / "agents" / "code-reviewer.md").exists()
+    assert not (fake_home / ".gemini" / "agents" / "code-reviewer.md").exists()
+
+
+def test_sync_harness_flag_repeatable(agents_home: Path, fake_home: Path) -> None:
+    install_fixture(agents_home, "minimal-agent")
+
+    assert (
+        main(
+            [
+                "sync",
+                "--source-root",
+                str(agents_home),
+                "--harness",
+                "claude",
+                "--harness",
+                "codex",
+            ]
+        )
+        == 0
+    )
+
+    assert (fake_home / ".claude" / "agents" / "code-reviewer.md").exists()
+    assert (fake_home / ".codex" / "agents" / "code-reviewer.toml").exists()
+    assert not (fake_home / ".gemini" / "agents" / "code-reviewer.md").exists()
+
+
+def test_sync_exclude_harness_skips_target(
+    agents_home: Path, fake_home: Path
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+
+    assert (
+        main(
+            [
+                "sync",
+                "--source-root",
+                str(agents_home),
+                "--exclude-harness",
+                "gemini",
+            ]
+        )
+        == 0
+    )
+
+    assert (fake_home / ".claude" / "agents" / "code-reviewer.md").exists()
+    assert not (fake_home / ".gemini" / "agents" / "code-reviewer.md").exists()
+
+
+def test_sync_no_tprompt_forces_skip_even_when_bin_available(
+    agents_home: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_fixture(agents_home, "tprompt-agent")
+    prompts_dir = _install_fake_tprompt(fake_home, monkeypatch)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+
+    assert (
+        main(["sync", "--source-root", str(agents_home), "--no-tprompt"]) == 0
+    )
+
+    target = prompts_dir / "skill-reviewer-ca.md"
+    assert not target.exists()
+    manifest = load_manifest(agents_home)
+    assert str(target) not in manifest.paths("tprompt")
+
+
+def test_sync_rejects_unknown_harness_flag(
+    agents_home: Path, fake_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+
+    assert (
+        main(["sync", "--source-root", str(agents_home), "--harness", "hermes"]) == 1
+    )
+    err = capsys.readouterr().err
+    assert "Unknown harness keyword" in err
+
+
+def test_sync_rejects_unknown_agent_flag(
+    agents_home: Path, fake_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+
+    assert (
+        main(["sync", "--source-root", str(agents_home), "--agents", "nope"]) == 1
+    )
+    err = capsys.readouterr().err
+    assert "Unknown agent name" in err
+
+
+def test_list_no_filter_prints_default(
+    agents_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+
+    assert main(["list", "--source-root", str(agents_home)]) == 0
+    out = capsys.readouterr().out
+    assert "code-reviewer:" in out
+    assert "[" not in out  # no harness annotation when no filter
+
+
+def test_list_with_filter_annotates_harnesses(
+    agents_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+
+    assert (
+        main(
+            [
+                "list",
+                "--source-root",
+                str(agents_home),
+                "--harness",
+                "claude,codex",
+            ]
+        )
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert "code-reviewer:" in out
+    assert "[claude, codex]" in out
+
+
 def test_sync_uses_copilot_home_override(
     agents_home: Path, fake_home: Path, monkeypatch
 ) -> None:

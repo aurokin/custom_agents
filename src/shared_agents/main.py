@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import sys
-from typing import Callable
+from typing import Any, Callable
 
 from .discover import DiscoveryError, discover_agents, resolve_source_root
 from .generators.claude import write_claude_agent
@@ -67,23 +67,87 @@ def _always_on_writers() -> dict[str, HarnessWriter]:
     }
 
 
+class CSVAction(argparse.Action):
+    """argparse action that splits comma-separated values and accumulates."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: Any,
+        option_string: str | None = None,
+    ) -> None:
+        items = [item.strip() for item in str(values).split(",") if item.strip()]
+        if not items:
+            raise argparse.ArgumentError(
+                self, f"{option_string} requires at least one non-empty value"
+            )
+        current = list(getattr(namespace, self.dest, None) or [])
+        current.extend(items)
+        setattr(namespace, self.dest, current)
+
+
+def _add_selection_flags(subparser: argparse.ArgumentParser) -> None:
+    subparser.add_argument(
+        "--agents",
+        action=CSVAction,
+        metavar="A,B,...",
+        help="Restrict to these agents (comma-separated; flag may repeat).",
+    )
+    subparser.add_argument(
+        "--exclude-agents",
+        action=CSVAction,
+        metavar="A,B,...",
+        help="Exclude these agents (comma-separated; flag may repeat).",
+    )
+    subparser.add_argument(
+        "--harness",
+        action=CSVAction,
+        metavar="H,...",
+        help="Restrict to these harnesses (comma-separated; flag may repeat).",
+    )
+    subparser.add_argument(
+        "--exclude-harness",
+        action=CSVAction,
+        metavar="H,...",
+        help="Exclude these harnesses (comma-separated; flag may repeat).",
+    )
+    subparser.add_argument(
+        "--no-tprompt",
+        action="store_true",
+        help="Force-disable tprompt for this run regardless of schema/availability.",
+    )
+
+
+def _build_filters(args: argparse.Namespace) -> CLIFilters:
+    return CLIFilters(
+        include_agents=frozenset(args.agents) if args.agents else None,
+        exclude_agents=frozenset(args.exclude_agents or ()),
+        include_harness=frozenset(args.harness) if args.harness else None,
+        exclude_harness=frozenset(args.exclude_harness or ()),
+        no_tprompt=bool(args.no_tprompt),
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="shared-agents")
+    parser = argparse.ArgumentParser(prog="shared-agents", allow_abbrev=False)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    sync = subparsers.add_parser("sync", help="Generate consumer-native agents")
+    sync = subparsers.add_parser("sync", help="Generate consumer-native agents", allow_abbrev=False)
     sync.add_argument("--dry-run", action="store_true")
     sync.add_argument("--link-canonical", action="store_true")
     sync.add_argument("--source-root", "--agents-home", dest="source_root", type=Path)
+    _add_selection_flags(sync)
 
-    list_cmd = subparsers.add_parser("list", help="List discovered agents")
+    list_cmd = subparsers.add_parser("list", help="List discovered agents", allow_abbrev=False)
     list_cmd.add_argument("--source-root", "--agents-home", dest="source_root", type=Path)
+    _add_selection_flags(list_cmd)
 
-    validate = subparsers.add_parser("validate", help="Validate one or all agents")
+    validate = subparsers.add_parser("validate", help="Validate one or all agents", allow_abbrev=False)
     validate.add_argument("agent_name", nargs="?")
     validate.add_argument("--source-root", "--agents-home", dest="source_root", type=Path)
 
-    clean = subparsers.add_parser("clean", help="Remove files owned by this tool")
+    clean = subparsers.add_parser("clean", help="Remove files owned by this tool", allow_abbrev=False)
     clean.add_argument("--dry-run", action="store_true")
     clean.add_argument("--source-root", "--agents-home", dest="source_root", type=Path)
 
@@ -101,9 +165,10 @@ def main(argv: list[str] | None = None) -> int:
                 source_root,
                 dry_run=args.dry_run,
                 link_canonical=args.link_canonical,
+                filters=_build_filters(args),
             )
         if args.command == "list":
-            return _cmd_list(source_root)
+            return _cmd_list(source_root, filters=_build_filters(args))
         if args.command == "validate":
             return _cmd_validate(source_root, args.agent_name)
         if args.command == "clean":
@@ -134,7 +199,13 @@ def _bucket_for(status: str) -> str:
     return "unchanged" if status == "unchanged" else "written"
 
 
-def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
+def _cmd_sync(
+    source_root: Path,
+    dry_run: bool,
+    link_canonical: bool,
+    filters: CLIFilters | None = None,
+) -> int:
+    filters = filters or CLIFilters()
     agents = discover_agents(source_root)
     _check_tprompt_path_collisions(agents)
     manifest = load_manifest(source_root)
@@ -143,8 +214,10 @@ def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
 
     writers = _always_on_writers()
     selections = resolve_selection(
-        agents, CLIFilters(), available_harnesses()
+        agents, filters, available_harnesses()
     )
+
+    scope = _build_scope(filters, agents) if filters.is_active() else None
 
     for selection in selections:
         for harness, writer in writers.items():
@@ -185,7 +258,9 @@ def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
             file=sys.stderr,
         )
 
-    removed = _remove_stale_generated_files(manifest, desired, dry_run=dry_run)
+    removed = _remove_stale_generated_files(
+        manifest, desired, scope=scope, dry_run=dry_run
+    )
 
     if link_canonical:
         link_summary, link_messages, linked_targets = sync_links(
@@ -206,7 +281,7 @@ def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
         save_manifest(
             source_root,
             Manifest(
-                generated_files={harness: list(desired[harness]) for harness in HARNESS_KEYWORDS},
+                generated_files=_merge_out_of_scope_entries(manifest, desired, scope),
                 linked_targets=linked_targets,
             ),
         )
@@ -239,10 +314,16 @@ def _format_sync_summary(
     return "".join(parts)
 
 
-def _cmd_list(source_root: Path) -> int:
+def _cmd_list(source_root: Path, filters: CLIFilters | None = None) -> int:
     agents = discover_agents(source_root)
-    for agent in agents:
-        print(f"{agent.name}: {agent.description} ({agent.source_dir})")
+    filters = filters or CLIFilters()
+    selections = resolve_selection(agents, filters, available_harnesses())
+    for selection in selections:
+        line = f"{selection.agent.name}: {selection.agent.description} ({selection.agent.source_dir})"
+        if filters.is_active():
+            harnesses = ", ".join(sorted(selection.harnesses)) or "<none>"
+            line += f" [{harnesses}]"
+        print(line)
     return 0
 
 
@@ -279,10 +360,72 @@ def _cmd_clean(source_root: Path, dry_run: bool) -> int:
     return 0
 
 
+@dataclass(frozen=True)
+class _Scope:
+    agents: frozenset[str]
+    harnesses: frozenset[str]
+    agent_filter_active: bool
+
+    def covers(self, entry: ManifestEntry, harness: str) -> bool:
+        if harness not in self.harnesses:
+            return False
+        if not entry.agent:
+            return not self.agent_filter_active
+        return entry.agent in self.agents
+
+
+def _build_scope(filters: CLIFilters, agents: list[AgentDefinition]) -> _Scope:
+    all_agents = {agent.name for agent in agents}
+    selected_agents = set(all_agents)
+    if filters.include_agents is not None:
+        selected_agents &= filters.include_agents
+    selected_agents -= filters.exclude_agents
+
+    selected_harnesses = set(HARNESS_KEYWORDS)
+    if filters.include_harness is not None:
+        selected_harnesses &= filters.include_harness
+    selected_harnesses -= filters.exclude_harness
+    if filters.no_tprompt:
+        selected_harnesses.discard("tprompt")
+
+    return _Scope(
+        agents=frozenset(selected_agents),
+        harnesses=frozenset(selected_harnesses),
+        agent_filter_active=(
+            filters.include_agents is not None or bool(filters.exclude_agents)
+        ),
+    )
+
+
+def _merge_out_of_scope_entries(
+    manifest: Manifest,
+    desired: dict[str, list[ManifestEntry]],
+    scope: _Scope | None,
+) -> dict[str, list[ManifestEntry]]:
+    if scope is None:
+        return {harness: list(desired[harness]) for harness in HARNESS_KEYWORDS}
+    merged: dict[str, list[ManifestEntry]] = {
+        harness: list(desired[harness]) for harness in HARNESS_KEYWORDS
+    }
+    for harness, entries in manifest.generated_files.items():
+        existing_paths = {entry.path for entry in merged.get(harness, [])}
+        for entry in entries:
+            if scope.covers(entry, harness):
+                continue
+            # Dedupe by path: freshly written entries with proper agent
+            # attribution win over migrated (agent="") ghosts at the same path.
+            if entry.path in existing_paths:
+                continue
+            merged.setdefault(harness, []).append(entry)
+            existing_paths.add(entry.path)
+    return merged
+
+
 def _remove_stale_generated_files(
     manifest: Manifest,
     desired: dict[str, list[ManifestEntry]],
     *,
+    scope: _Scope | None = None,
     dry_run: bool,
     remove_all: bool = False,
 ) -> int:
@@ -290,6 +433,8 @@ def _remove_stale_generated_files(
     for consumer, entries in manifest.generated_files.items():
         desired_paths = {entry.path for entry in desired.get(consumer, [])}
         for entry in entries:
+            if scope is not None and not scope.covers(entry, consumer):
+                continue
             if not remove_all and entry.path in desired_paths:
                 continue
             path = Path(entry.path)

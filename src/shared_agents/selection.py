@@ -15,6 +15,15 @@ class CLIFilters:
     exclude_harness: frozenset[str] = frozenset()
     no_tprompt: bool = False
 
+    def is_active(self) -> bool:
+        return (
+            self.include_agents is not None
+            or bool(self.exclude_agents)
+            or self.include_harness is not None
+            or bool(self.exclude_harness)
+            or self.no_tprompt
+        )
+
 
 @dataclass(frozen=True)
 class AgentSelection:
