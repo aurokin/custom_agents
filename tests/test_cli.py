@@ -628,6 +628,43 @@ def test_sync_migrates_v1_manifest_with_notice(
     assert "upgrading manifest" not in second.err
 
 
+def test_sync_default_output_byte_stable_regression(
+    agents_home: Path, fake_home: Path
+) -> None:
+    """Pin byte-identical default sync output against snapshot hashes.
+
+    Regenerate with:
+        cd /tmp && rm -rf snap && mkdir snap && cd snap && \
+            PYTHONPATH=<repo>/src HOME=$PWD python3 -c '...' && \
+            shasum -a 256 .claude/agents/code-reviewer.md ...
+    """
+    import hashlib
+
+    install_fixture(agents_home, "minimal-agent")
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+
+    expected = {
+        ".claude/agents/code-reviewer.md":
+            "7a304035d8109750ec2fc4cb188ddf1550a457200f16ea14f26e00d7c83db789",
+        ".copilot/agents/code-reviewer.agent.md":
+            "00143513286b11b967746b2380557c6009f1d6a8b7d899e4d91bdf486085da3c",
+        ".codex/agents/code-reviewer.toml":
+            "47f297a27678429d3bba4b6294c07bae86adae3b99013e0453633503d3e7fafd",
+        ".cursor/agents/code-reviewer.md":
+            "1580812c073609748a74d2b396c16e64728e7f575f530109e4ca6407e66a162b",
+        ".gemini/agents/code-reviewer.md":
+            "cf7c471e5b16ab93a1956ee72c3a09ff0c8edff82f42796258748be03cd30414",
+    }
+    for relpath, want_hash in expected.items():
+        target = fake_home / relpath
+        assert target.exists(), f"missing: {relpath}"
+        got_hash = hashlib.sha256(target.read_bytes()).hexdigest()
+        assert got_hash == want_hash, (
+            f"{relpath} content changed: {got_hash[:12]} != {want_hash[:12]}"
+        )
+
+
 def test_sync_uses_copilot_home_override(
     agents_home: Path, fake_home: Path, monkeypatch
 ) -> None:
