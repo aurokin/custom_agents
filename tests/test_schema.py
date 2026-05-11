@@ -699,8 +699,8 @@ def test_schema_harness_rejects_duplicate_keyword(agents_home: Path) -> None:
         load_agent_definition(source_dir)
 
 
-def test_repo_retrorabbit_code_reviewer_definition() -> None:
-    source_dir = Path(__file__).resolve().parents[1] / "agents" / "retrorabbit_code_reviewer"
+def test_repo_retrorabbit_code_reviewer_definition(initialized_repo: Path) -> None:
+    source_dir = initialized_repo / "agents" / "retrorabbit_code_reviewer"
 
     agent = load_agent_definition(source_dir)
 

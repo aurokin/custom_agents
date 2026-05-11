@@ -6,6 +6,19 @@ import shutil
 import pytest
 
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def initialized_repo(tmp_path: Path) -> Path:
+    """Temp copy of the repo's agents/ tree with `shared-agents init` applied."""
+    shutil.copytree(REPO_ROOT / "agents", tmp_path / "agents")
+    from shared_agents.main import main
+
+    assert main(["init", "--source-root", str(tmp_path)]) == 0
+    return tmp_path
+
+
 @pytest.fixture
 def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "home"

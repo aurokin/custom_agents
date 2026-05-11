@@ -6,3 +6,7 @@ dist/
 build/
 *.egg-info/
 .shared-agents-manifest.json
+# Personal harness overrides for committed agents; the canonical
+# definition is the agent.yaml.example sibling, materialized via
+# `shared-agents init`.
+/agents/**/agent.yaml

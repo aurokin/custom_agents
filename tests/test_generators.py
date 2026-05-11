@@ -502,8 +502,8 @@ def test_tprompt_generator_roundtrip(agents_home: Path) -> None:
     )
 
 
-def test_repo_retrorabbit_renders_as_floating_agent() -> None:
-    source_dir = Path(__file__).resolve().parents[1] / "agents" / "retrorabbit_code_reviewer"
+def test_repo_retrorabbit_renders_as_floating_agent(initialized_repo: Path) -> None:
+    source_dir = initialized_repo / "agents" / "retrorabbit_code_reviewer"
     agent = load_agent_definition(source_dir)
 
     claude_frontmatter = _parse_frontmatter(render_claude_agent(agent))
