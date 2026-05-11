@@ -58,6 +58,18 @@ def test_discover_uses_agents_home_env_when_cwd_has_no_agents(
     assert [agent.name for agent in discover_agents()] == ["env-agent"]
 
 
+def test_discover_raises_on_example_only_directory(agents_home: Path) -> None:
+    example_dir = agents_home / "agents" / "needs-init"
+    example_dir.mkdir(parents=True)
+    (example_dir / "agent.yaml.example").write_text(
+        "name: needs-init\ndescription: Needs init\n", encoding="utf-8"
+    )
+    (example_dir / "instructions.md").write_text("Be useful.\n", encoding="utf-8")
+
+    with pytest.raises(DiscoveryError, match="shared-agents init"):
+        discover_agents(agents_home)
+
+
 def test_repo_contains_plan_reviewer_agent() -> None:
     repo_root = Path(__file__).resolve().parents[1]
 

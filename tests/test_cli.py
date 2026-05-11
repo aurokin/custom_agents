@@ -1130,6 +1130,85 @@ def test_list_with_filter_annotates_harnesses(
     assert "[claude, codex]" in out
 
 
+def test_init_copies_example_when_agent_yaml_absent(agents_home: Path) -> None:
+    example_dir = agents_home / "agents" / "needs-init"
+    example_dir.mkdir(parents=True)
+    (example_dir / "agent.yaml.example").write_text(
+        "name: needs-init\ndescription: Needs init\n", encoding="utf-8"
+    )
+    (example_dir / "instructions.md").write_text("Be useful.\n", encoding="utf-8")
+
+    assert main(["init", "--source-root", str(agents_home)]) == 0
+
+    target = example_dir / "agent.yaml"
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == (
+        example_dir / "agent.yaml.example"
+    ).read_text(encoding="utf-8")
+
+
+def test_init_is_idempotent(
+    agents_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    example_dir = agents_home / "agents" / "needs-init"
+    example_dir.mkdir(parents=True)
+    (example_dir / "agent.yaml.example").write_text(
+        "name: needs-init\ndescription: Needs init\n", encoding="utf-8"
+    )
+    (example_dir / "instructions.md").write_text("Be useful.\n", encoding="utf-8")
+
+    assert main(["init", "--source-root", str(agents_home)]) == 0
+    capsys.readouterr()
+    assert main(["init", "--source-root", str(agents_home)]) == 0
+    out = capsys.readouterr().out
+    assert "copied 0, skipped 1" in out
+
+
+def test_init_never_overwrites_existing_agent_yaml(agents_home: Path) -> None:
+    example_dir = agents_home / "agents" / "has-yaml"
+    example_dir.mkdir(parents=True)
+    (example_dir / "agent.yaml.example").write_text(
+        "name: from-example\ndescription: From example\n", encoding="utf-8"
+    )
+    target = example_dir / "agent.yaml"
+    target.write_text(
+        "name: from-user\ndescription: Hand-edited\n", encoding="utf-8"
+    )
+    (example_dir / "instructions.md").write_text("Be useful.\n", encoding="utf-8")
+
+    assert main(["init", "--source-root", str(agents_home)]) == 0
+
+    assert "from-user" in target.read_text(encoding="utf-8")
+
+
+def test_init_dry_run_does_not_copy(agents_home: Path) -> None:
+    example_dir = agents_home / "agents" / "needs-init"
+    example_dir.mkdir(parents=True)
+    (example_dir / "agent.yaml.example").write_text(
+        "name: needs-init\ndescription: Needs init\n", encoding="utf-8"
+    )
+    (example_dir / "instructions.md").write_text("Be useful.\n", encoding="utf-8")
+
+    assert main(["init", "--source-root", str(agents_home), "--dry-run"]) == 0
+
+    assert not (example_dir / "agent.yaml").exists()
+
+
+def test_sync_fails_clearly_when_only_example_present(
+    agents_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    example_dir = agents_home / "agents" / "needs-init"
+    example_dir.mkdir(parents=True)
+    (example_dir / "agent.yaml.example").write_text(
+        "name: needs-init\ndescription: Needs init\n", encoding="utf-8"
+    )
+    (example_dir / "instructions.md").write_text("Be useful.\n", encoding="utf-8")
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 1
+    err = capsys.readouterr().err
+    assert "shared-agents init" in err
+
+
 def test_sync_uses_copilot_home_override(
     agents_home: Path, fake_home: Path, monkeypatch
 ) -> None:

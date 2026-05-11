@@ -4,6 +4,7 @@ import argparse
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import shutil
 import sys
 from typing import Any, Callable
 
@@ -156,6 +157,14 @@ def build_parser() -> argparse.ArgumentParser:
     clean.add_argument("--source-root", "--agents-home", dest="source_root", type=Path)
     _add_selection_flags(clean)
 
+    init = subparsers.add_parser(
+        "init",
+        help="Bootstrap agent.yaml from agent.yaml.example for every agent",
+        allow_abbrev=False,
+    )
+    init.add_argument("--dry-run", action="store_true")
+    init.add_argument("--source-root", "--agents-home", dest="source_root", type=Path)
+
     return parser
 
 
@@ -182,6 +191,8 @@ def main(argv: list[str] | None = None) -> int:
                 dry_run=args.dry_run,
                 filters=_build_filters(args),
             )
+        if args.command == "init":
+            return _cmd_init(source_root, dry_run=args.dry_run)
     except DiscoveryError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -337,6 +348,28 @@ def _cmd_list(source_root: Path, filters: CLIFilters | None = None) -> int:
             harnesses = ", ".join(sorted(selection.harnesses)) or "<none>"
             line += f" [{harnesses}]"
         print(line)
+    return 0
+
+
+def _cmd_init(source_root: Path, dry_run: bool) -> int:
+    agents_dir = source_root / "agents"
+    verb = "would copy" if dry_run else "copy"
+    summary_verb = "would copy" if dry_run else "copied"
+    if not agents_dir.exists():
+        print(f"init: {summary_verb} 0, skipped 0")
+        return 0
+    copied = 0
+    skipped = 0
+    for example_path in sorted(agents_dir.rglob("agent.yaml.example")):
+        target = example_path.with_name("agent.yaml")
+        if target.exists():
+            skipped += 1
+            continue
+        if not dry_run:
+            shutil.copy2(example_path, target)
+        copied += 1
+        print(f"init: {verb} {example_path} -> {target}")
+    print(f"init: {summary_verb} {copied}, skipped {skipped}")
     return 0
 
 

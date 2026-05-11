@@ -34,8 +34,24 @@ def iter_agent_directories(source_root: Path) -> Iterable[Path]:
     return sorted(path.parent for path in agents_dir.rglob("agent.yaml"))
 
 
+def iter_example_only_directories(source_root: Path) -> list[Path]:
+    agents_dir = source_root / "agents"
+    if not agents_dir.exists():
+        return []
+    example_dirs = {path.parent for path in agents_dir.rglob("agent.yaml.example")}
+    yaml_dirs = {path.parent for path in agents_dir.rglob("agent.yaml")}
+    return sorted(example_dirs - yaml_dirs)
+
+
 def discover_agents(source_root: Path | None = None) -> list[AgentDefinition]:
     resolved_home = resolve_source_root(source_root)
+    example_only = iter_example_only_directories(resolved_home)
+    if example_only:
+        listing = ", ".join(str(path) for path in example_only)
+        raise DiscoveryError(
+            f"agent.yaml.example without agent.yaml in: {listing} — "
+            "run `shared-agents init` to bootstrap"
+        )
     discovered: list[AgentDefinition] = []
     seen_names: dict[str, Path] = {}
     for source_dir in iter_agent_directories(resolved_home):
