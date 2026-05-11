@@ -18,7 +18,13 @@ from .generators.tprompt import (
     write_tprompt_agent,
 )
 from .linker import prune_stale_links, sync_links
-from .manifest import Manifest, load_manifest, remove_legacy_manifest, save_manifest
+from .manifest import (
+    Manifest,
+    ManifestEntry,
+    load_manifest,
+    remove_legacy_manifest,
+    save_manifest,
+)
 from .schema import AgentDefinition
 
 
@@ -119,11 +125,11 @@ def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
         codex_path = Path.home() / ".codex" / "agents" / f"{agent.output_name}.toml"
         cursor_path = cursor_home / "agents" / f"{agent.output_name}.md"
         gemini_path = gemini_home / "agents" / f"{agent.output_name}.md"
-        desired["claude"].append(str(claude_path))
-        desired["copilot"].append(str(copilot_path))
-        desired["codex"].append(str(codex_path))
-        desired["cursor"].append(str(cursor_path))
-        desired["gemini"].append(str(gemini_path))
+        desired["claude"].append(ManifestEntry(agent=agent.name, path=str(claude_path)))
+        desired["copilot"].append(ManifestEntry(agent=agent.name, path=str(copilot_path)))
+        desired["codex"].append(ManifestEntry(agent=agent.name, path=str(codex_path)))
+        desired["cursor"].append(ManifestEntry(agent=agent.name, path=str(cursor_path)))
+        desired["gemini"].append(ManifestEntry(agent=agent.name, path=str(gemini_path)))
 
         claude_status = write_claude_agent(claude_path, agent, dry_run=dry_run)
         if claude_status == "unchanged":
@@ -161,9 +167,13 @@ def _cmd_sync(source_root: Path, dry_run: bool, link_canonical: bool) -> int:
         if tprompt_bin is None:
             summary.tprompt_skipped += 1
             if tprompt_path.exists():
-                desired["tprompt"].append(str(tprompt_path))
+                desired["tprompt"].append(
+                    ManifestEntry(agent=agent.name, path=str(tprompt_path))
+                )
             continue
-        desired["tprompt"].append(str(tprompt_path))
+        desired["tprompt"].append(
+            ManifestEntry(agent=agent.name, path=str(tprompt_path))
+        )
         tprompt_status = write_tprompt_agent(
             tprompt_path, agent, executable=tprompt_bin, dry_run=dry_run
         )
@@ -280,18 +290,18 @@ def _cmd_clean(source_root: Path, dry_run: bool) -> int:
 
 def _remove_stale_generated_files(
     manifest: Manifest,
-    desired: dict[str, list[str]],
+    desired: dict[str, list[ManifestEntry]],
     *,
     dry_run: bool,
     remove_all: bool = False,
 ) -> int:
     removed = 0
-    for consumer, paths in manifest.generated_files.items():
-        desired_paths = set(desired.get(consumer, []))
-        for path_str in paths:
-            if not remove_all and path_str in desired_paths:
+    for consumer, entries in manifest.generated_files.items():
+        desired_paths = {entry.path for entry in desired.get(consumer, [])}
+        for entry in entries:
+            if not remove_all and entry.path in desired_paths:
                 continue
-            path = Path(path_str)
+            path = Path(entry.path)
             if path.exists() or path.is_symlink():
                 if not dry_run:
                     path.unlink()

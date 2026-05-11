@@ -15,7 +15,12 @@ import pytest
 import yaml
 
 from shared_agents.main import main
-from shared_agents.manifest import legacy_manifest_path, load_manifest
+from shared_agents.manifest import (
+    MANIFEST_VERSION,
+    legacy_manifest_path,
+    load_manifest,
+    manifest_path,
+)
 from tests.conftest import install_fixture, write_agent
 
 
@@ -440,7 +445,7 @@ def test_sync_writes_tprompt_when_executable_available(
     assert "Do not use subagents for this specific request." in rendered
 
     manifest = load_manifest(agents_home)
-    assert str(target) in manifest.generated_files["tprompt"]
+    assert str(target) in manifest.paths("tprompt")
 
 
 def test_sync_resync_overwrites_existing_tprompt_in_place(
@@ -475,7 +480,7 @@ def test_sync_warns_and_skips_when_tprompt_missing(
     captured = capsys.readouterr()
     assert "tprompt not on PATH" in captured.err
     manifest = load_manifest(agents_home)
-    assert str(target) not in manifest.generated_files["tprompt"]
+    assert str(target) not in manifest.paths("tprompt")
 
 
 def test_first_sync_without_binary_does_not_claim_unwritten_path(
@@ -489,7 +494,7 @@ def test_first_sync_without_binary_does_not_claim_unwritten_path(
 
     target = fake_home / ".config" / "tprompt" / "prompts" / "skill-reviewer-ca.md"
     manifest = load_manifest(agents_home)
-    assert str(target) not in manifest.generated_files["tprompt"]
+    assert str(target) not in manifest.paths("tprompt")
 
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("hand-authored content\n", encoding="utf-8")
@@ -518,7 +523,7 @@ def test_resync_preserves_tprompt_file_when_binary_disappears(
     assert target.exists()
     assert target.read_text(encoding="utf-8") == original_content
     manifest = load_manifest(agents_home)
-    assert str(target) in manifest.generated_files["tprompt"]
+    assert str(target) in manifest.paths("tprompt")
 
 
 def test_sync_rejects_duplicate_tprompt_filename(
@@ -574,6 +579,55 @@ def test_clean_removes_tprompt_files(
     assert not target.exists()
 
 
+def test_sync_migrates_v1_manifest_with_notice(
+    agents_home: Path,
+    fake_home: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    install_fixture(agents_home, "minimal-agent")
+    stale_path = fake_home / ".claude" / "agents" / "stale-reviewer.md"
+    stale_path.parent.mkdir(parents=True, exist_ok=True)
+    stale_path.write_text("stale\n", encoding="utf-8")
+    primary = manifest_path(agents_home)
+    primary.parent.mkdir(parents=True, exist_ok=True)
+    primary.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "generated_files": {
+                    "claude": [str(stale_path)],
+                    "copilot": [],
+                    "codex": [],
+                    "cursor": [],
+                    "gemini": [],
+                    "tprompt": [],
+                },
+                "linked_targets": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+    captured = capsys.readouterr()
+    assert captured.err.count("upgrading manifest") == 1
+    assert "from v1 to v2" in captured.err
+    assert not stale_path.exists()
+
+    persisted = json.loads(primary.read_text(encoding="utf-8"))
+    assert persisted["version"] == MANIFEST_VERSION
+    assert persisted["generated_files"]["claude"] == [
+        {
+            "agent": "code-reviewer",
+            "path": str(fake_home / ".claude" / "agents" / "code-reviewer.md"),
+        }
+    ]
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+    second = capsys.readouterr()
+    assert "upgrading manifest" not in second.err
+
+
 def test_sync_uses_copilot_home_override(
     agents_home: Path, fake_home: Path, monkeypatch
 ) -> None:
@@ -586,7 +640,7 @@ def test_sync_uses_copilot_home_override(
     assert (copilot_home / "agents" / "code-reviewer.agent.md").exists()
     assert not (fake_home / ".copilot" / "agents" / "code-reviewer.agent.md").exists()
     manifest = load_manifest(agents_home)
-    assert str(copilot_home / "agents" / "code-reviewer.agent.md") in manifest.generated_files["copilot"]
+    assert str(copilot_home / "agents" / "code-reviewer.agent.md") in manifest.paths("copilot")
 
     assert main(["clean", "--source-root", str(agents_home)]) == 0
     assert not (copilot_home / "agents" / "code-reviewer.agent.md").exists()
