@@ -7,6 +7,8 @@ from typing import Any
 
 import yaml
 
+from .harnesses import HARNESS_KEYWORDS
+
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 SHARED_SANDBOX_VALUES = {"read-only", "workspace-write", "full-access"}
@@ -93,6 +95,12 @@ class CursorConfig:
 
 
 @dataclass(frozen=True)
+class HarnessConfig:
+    include: list[str] | None = None
+    exclude: list[str] | None = None
+
+
+@dataclass(frozen=True)
 class TpromptConfig:
     enabled: bool = False
     title: str | None = None
@@ -119,6 +127,7 @@ class AgentDefinition:
     cursor: CursorConfig
     gemini: GeminiConfig
     tprompt: TpromptConfig
+    harness: HarnessConfig
 
     def resolved_cursor_readonly(self) -> bool | None:
         if self.cursor.readonly is not None:
@@ -403,6 +412,8 @@ def load_agent_definition(source_dir: Path) -> AgentDefinition:
     )
     _validate_gemini_config(gemini, agent_yaml_path)
 
+    harness = _load_harness_config(raw, agent_yaml_path)
+
     unknown_top_level = set(raw) - {
         "name",
         "description",
@@ -413,6 +424,7 @@ def load_agent_definition(source_dir: Path) -> AgentDefinition:
         "cursor",
         "gemini",
         "tprompt",
+        "harness",
     }
     if unknown_top_level:
         unknown_keys = ", ".join(sorted(unknown_top_level))
@@ -432,7 +444,58 @@ def load_agent_definition(source_dir: Path) -> AgentDefinition:
         cursor=cursor,
         gemini=gemini,
         tprompt=tprompt,
+        harness=harness,
     )
+
+
+def _load_harness_config(raw: dict[str, Any], path: Path) -> HarnessConfig:
+    if "harness" not in raw:
+        return HarnessConfig()
+    harness_raw = _optional_mapping(raw, "harness", path)
+    unknown = set(harness_raw) - {"include", "exclude"}
+    if unknown:
+        unknown_keys = ", ".join(sorted(unknown))
+        raise SchemaError(f"Unknown harness keys in {path}: {unknown_keys}")
+    include_present = "include" in harness_raw and harness_raw["include"] is not None
+    exclude_present = "exclude" in harness_raw and harness_raw["exclude"] is not None
+    if include_present and exclude_present:
+        raise SchemaError(
+            f"harness in {path} must set only one of 'include' or 'exclude'"
+        )
+    include = _load_harness_keyword_list(harness_raw, "include", path) if include_present else None
+    exclude = _load_harness_keyword_list(harness_raw, "exclude", path) if exclude_present else None
+    return HarnessConfig(include=include, exclude=exclude)
+
+
+def _load_harness_keyword_list(
+    data: dict[str, Any], key: str, path: Path
+) -> list[str]:
+    value = data[key]
+    if not isinstance(value, list):
+        raise SchemaError(f"Expected harness.{key} to be a list in {path}")
+    if not value:
+        raise SchemaError(f"harness.{key} in {path} must not be empty")
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise SchemaError(
+                f"Expected every item in harness.{key} to be a non-empty string in {path}"
+            )
+        keyword = item.strip()
+        if keyword not in HARNESS_KEYWORDS:
+            allowed = ", ".join(sorted(HARNESS_KEYWORDS))
+            raise SchemaError(
+                f"Unknown harness keyword in harness.{key} in {path}: {keyword!r} "
+                f"(allowed: {allowed})"
+            )
+        if keyword in seen:
+            raise SchemaError(
+                f"Duplicate harness keyword in harness.{key} in {path}: {keyword!r}"
+            )
+        seen.add(keyword)
+        result.append(keyword)
+    return result
 
 
 def _load_yaml_mapping(path: Path) -> dict[str, Any]:

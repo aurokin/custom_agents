@@ -541,6 +541,164 @@ def test_schema_tprompt_rejects_invalid_filename(agents_home: Path) -> None:
         load_agent_definition(source_dir)
 
 
+def test_schema_harness_defaults_to_empty(agents_home: Path) -> None:
+    source_dir = install_fixture(agents_home, "minimal-agent", "reviewer")
+
+    agent = load_agent_definition(source_dir)
+
+    assert agent.harness.include is None
+    assert agent.harness.exclude is None
+
+
+def test_schema_harness_include_parses(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "with-include",
+        "\n".join(
+            [
+                "name: with-include",
+                "description: Has harness.include",
+                "harness:",
+                "  include: [claude, codex]",
+            ]
+        ),
+    )
+
+    agent = load_agent_definition(source_dir)
+
+    assert agent.harness.include == ["claude", "codex"]
+    assert agent.harness.exclude is None
+
+
+def test_schema_harness_exclude_parses(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "with-exclude",
+        "\n".join(
+            [
+                "name: with-exclude",
+                "description: Has harness.exclude",
+                "harness:",
+                "  exclude: [tprompt, gemini]",
+            ]
+        ),
+    )
+
+    agent = load_agent_definition(source_dir)
+
+    assert agent.harness.exclude == ["tprompt", "gemini"]
+    assert agent.harness.include is None
+
+
+def test_schema_harness_rejects_both_include_and_exclude(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "both",
+        "\n".join(
+            [
+                "name: both",
+                "description: Sets both",
+                "harness:",
+                "  include: [claude]",
+                "  exclude: [tprompt]",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="only one of 'include' or 'exclude'"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_harness_rejects_unknown_keyword(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "bad-keyword",
+        "\n".join(
+            [
+                "name: bad-keyword",
+                "description: Unknown keyword",
+                "harness:",
+                "  include: [claude, hermes]",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="Unknown harness keyword"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_harness_rejects_empty_include(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "empty-include",
+        "\n".join(
+            [
+                "name: empty-include",
+                "description: Empty include",
+                "harness:",
+                "  include: []",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="harness.include .* must not be empty"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_harness_rejects_empty_exclude(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "empty-exclude",
+        "\n".join(
+            [
+                "name: empty-exclude",
+                "description: Empty exclude",
+                "harness:",
+                "  exclude: []",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="harness.exclude .* must not be empty"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_harness_rejects_unknown_subkey(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "weird-key",
+        "\n".join(
+            [
+                "name: weird-key",
+                "description: Has bad key",
+                "harness:",
+                "  forbid: [claude]",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="Unknown harness keys"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_harness_rejects_duplicate_keyword(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "dup-keyword",
+        "\n".join(
+            [
+                "name: dup-keyword",
+                "description: Duplicate keyword",
+                "harness:",
+                "  include: [claude, claude]",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="Duplicate harness keyword"):
+        load_agent_definition(source_dir)
+
+
 def test_repo_retrorabbit_code_reviewer_definition() -> None:
     source_dir = Path(__file__).resolve().parents[1] / "agents" / "retrorabbit_code_reviewer"
 

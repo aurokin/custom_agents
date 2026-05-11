@@ -6,10 +6,11 @@ import os
 import sys
 from pathlib import Path
 
+from .harnesses import HARNESS_KEYWORDS
+
 
 MANIFEST_VERSION = 2
 MANIFEST_FILENAME = ".shared-agents-manifest.json"
-HARNESS_KEYS = ("claude", "copilot", "codex", "cursor", "gemini", "tprompt")
 
 
 @dataclass(frozen=True)
@@ -26,7 +27,7 @@ class Manifest:
     @classmethod
     def empty(cls) -> "Manifest":
         return cls(
-            generated_files={harness: [] for harness in HARNESS_KEYS},
+            generated_files={harness: [] for harness in HARNESS_KEYWORDS},
             linked_targets={},
         )
 
@@ -70,12 +71,12 @@ def load_manifest(agents_home: Path) -> Manifest:
                     for raw_path in generated_raw.get(harness, [])
                     if isinstance(raw_path, str)
                 ]
-                for harness in HARNESS_KEYS
+                for harness in HARNESS_KEYWORDS
             }
         else:
             generated_files = {
                 harness: list(_iter_v2_entries(generated_raw.get(harness, [])))
-                for harness in HARNESS_KEYS
+                for harness in HARNESS_KEYWORDS
             }
         return Manifest(
             generated_files=generated_files,
