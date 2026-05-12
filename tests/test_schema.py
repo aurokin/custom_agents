@@ -21,15 +21,15 @@ def test_schema_minimal(agents_home: Path) -> None:
     assert agent.skills == []
     assert agent.claude.model is None
     assert agent.claude.effort is None
-    assert agent.resolved_claude_model() == "opus-4.6"
+    assert agent.resolved_claude_model() == "opus-4.7"
     assert agent.resolved_claude_effort() == "high"
     assert agent.codex.model is None
     assert agent.codex.model_reasoning_effort is None
-    assert agent.resolved_codex_model() == "gpt-5.4"
+    assert agent.resolved_codex_model() == "gpt-5.5"
     assert agent.resolved_codex_reasoning_effort() == "high"
     assert agent.codex.sandbox_mode is None
     assert agent.copilot.model is None
-    assert agent.resolved_copilot_model() == "gpt-5.4-high"
+    assert agent.resolved_copilot_model() == "gpt-5.5-high"
     assert agent.gemini.model is None
 
 
@@ -700,11 +700,11 @@ def test_schema_harness_rejects_duplicate_keyword(agents_home: Path) -> None:
 
 
 def test_repo_retrorabbit_code_reviewer_definition(initialized_repo: Path) -> None:
-    source_dir = initialized_repo / "agents" / "retrorabbit_code_reviewer"
+    source_dir = initialized_repo / "agents" / "retrorabbit-code-reviewer"
 
     agent = load_agent_definition(source_dir)
 
-    assert agent.name == "retrorabbit_code_reviewer"
+    assert agent.name == "retrorabbit-code-reviewer"
     assert agent.description == "Reviews code hunks for correctness, risk, and maintainability."
     assert agent.sandbox == "read-only"
     assert agent.model_strategy == "floating"
@@ -719,3 +719,23 @@ def test_repo_retrorabbit_code_reviewer_definition(initialized_repo: Path) -> No
     assert agent.gemini.tools == ["read_file", "grep_search"]
     assert agent.gemini.max_turns == 16
     assert agent.gemini.model is None
+
+
+def test_repo_codexrabbit_code_reviewer_definition(initialized_repo: Path) -> None:
+    source_dir = initialized_repo / "agents" / "codexrabbit-code-reviewer"
+
+    agent = load_agent_definition(source_dir)
+
+    assert agent.name == "codexrabbit-code-reviewer"
+    assert agent.sandbox == "read-only"
+    assert agent.model_strategy == "floating"
+    assert agent.should_emit_model_defaults() is False
+    assert agent.harness.include is None
+    assert agent.harness.exclude is None
+    assert agent.claude.tools == ["Read", "Grep", "Glob"]
+    assert agent.claude.disallowed_tools == ["Write"]
+    assert agent.claude.max_turns == 16
+    assert agent.codex.model is None
+    assert agent.codex.nickname_candidates == ["CodexRabbit"]
+    assert agent.gemini.tools == ["read_file", "grep_search"]
+    assert agent.gemini.max_turns == 16

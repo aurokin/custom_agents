@@ -31,6 +31,22 @@ class AgentSelection:
     harnesses: frozenset[str]
 
 
+def cli_harness_set(available: Iterable[str], filters: CLIFilters) -> set[str]:
+    """Apply the CLI-level harness filters (not per-agent ``harness:`` rules).
+
+    This is the single source of truth for the ``--harness`` / ``--exclude-harness``
+    / ``--no-tprompt`` precedence; both :func:`resolve_selection` and the scoped
+    ``clean`` path route through it.
+    """
+    base = set(available)
+    if filters.include_harness is not None:
+        base &= set(filters.include_harness)
+    base -= set(filters.exclude_harness)
+    if filters.no_tprompt:
+        base.discard("tprompt")
+    return base
+
+
 def resolve_selection(
     agents: list[AgentDefinition],
     filters: CLIFilters,
@@ -53,18 +69,12 @@ def resolve_selection(
         if agent.name in filters.exclude_agents:
             continue
 
-        base = set(available_set)
-        if filters.include_harness is not None:
-            base &= filters.include_harness
-        base -= filters.exclude_harness
-
+        base = cli_harness_set(available_set, filters)
         if agent.harness.include is not None:
             base &= set(agent.harness.include)
         if agent.harness.exclude:
             base -= set(agent.harness.exclude)
 
-        if filters.no_tprompt:
-            base.discard("tprompt")
         if "tprompt" in base and not agent.tprompt.enabled:
             base.discard("tprompt")
 

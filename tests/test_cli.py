@@ -110,10 +110,10 @@ def test_sync_end_to_end(agents_home: Path, fake_home: Path) -> None:
         )
     )
 
-    assert claude_frontmatter["model"] == "opus-4.6"
+    assert claude_frontmatter["model"] == "opus-4.7"
     assert claude_frontmatter["effort"] == "high"
-    assert copilot_frontmatter["model"] == "gpt-5.4-high"
-    assert codex_document["model"] == "gpt-5.4"
+    assert copilot_frontmatter["model"] == "gpt-5.5-high"
+    assert codex_document["model"] == "gpt-5.5"
     assert codex_document["model_reasoning_effort"] == "high"
     assert "tools" not in gemini_frontmatter
     assert "model" not in gemini_frontmatter
@@ -646,11 +646,11 @@ def test_sync_default_output_byte_stable_regression(
 
     expected = {
         ".claude/agents/code-reviewer.md":
-            "7a304035d8109750ec2fc4cb188ddf1550a457200f16ea14f26e00d7c83db789",
+            "a13749e8dd2bcd36594ff1758388f660491deb32145ec4835a068cbb9d0ef22e",
         ".copilot/agents/code-reviewer.agent.md":
-            "00143513286b11b967746b2380557c6009f1d6a8b7d899e4d91bdf486085da3c",
+            "24e3bba8ef3f3ae3e2183540e734c51ecf9b09d0e6a4ebea448426fca819a136",
         ".codex/agents/code-reviewer.toml":
-            "47f297a27678429d3bba4b6294c07bae86adae3b99013e0453633503d3e7fafd",
+            "e08c0c88cd0fb937fd8b07610b61cd5ffe271b3af6ac73b69326fdb51248e5f9",
         ".cursor/agents/code-reviewer.md":
             "1580812c073609748a74d2b396c16e64728e7f575f530109e4ca6407e66a162b",
         ".gemini/agents/code-reviewer.md":
@@ -1073,6 +1073,57 @@ def test_sync_no_tprompt_forces_skip_even_when_bin_available(
     assert str(target) not in manifest.paths("tprompt")
 
 
+def test_sync_summary_reports_tprompt_excluded_not_skipped(
+    agents_home: Path,
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    install_fixture(agents_home, "tprompt-agent")
+    _install_fake_tprompt(fake_home, monkeypatch)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+
+    assert main(["sync", "--source-root", str(agents_home), "--no-tprompt"]) == 0
+
+    captured = capsys.readouterr()
+    assert "tprompt written=0 unchanged=0 skipped=0 excluded=1" in captured.out
+    assert "tprompt not on PATH" not in captured.err
+
+
+def test_sync_summary_reports_tprompt_skipped_when_bin_missing(
+    agents_home: Path,
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    install_fixture(agents_home, "tprompt-agent")
+    monkeypatch.setenv("PATH", str(fake_home / "nonexistent-bin"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+
+    captured = capsys.readouterr()
+    assert "tprompt written=0 unchanged=0 skipped=1 excluded=0" in captured.out
+    assert "tprompt not on PATH" in captured.err
+
+
+def test_sync_summary_reports_tprompt_excluded_when_bin_missing_and_deselected(
+    agents_home: Path,
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    install_fixture(agents_home, "tprompt-agent")
+    monkeypatch.setenv("PATH", str(fake_home / "nonexistent-bin"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+
+    assert main(["sync", "--source-root", str(agents_home), "--no-tprompt"]) == 0
+
+    captured = capsys.readouterr()
+    assert "tprompt written=0 unchanged=0 skipped=0 excluded=1" in captured.out
+    assert "tprompt not on PATH" not in captured.err
+
+
 def test_sync_rejects_unknown_harness_flag(
     agents_home: Path, fake_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1194,8 +1245,8 @@ def test_init_dry_run_does_not_copy(agents_home: Path) -> None:
     assert not (example_dir / "agent.yaml").exists()
 
 
-def test_sync_fails_clearly_when_only_example_present(
-    agents_home: Path, capsys: pytest.CaptureFixture[str]
+def test_sync_auto_materializes_example(
+    agents_home: Path, fake_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     example_dir = agents_home / "agents" / "needs-init"
     example_dir.mkdir(parents=True)
@@ -1204,9 +1255,54 @@ def test_sync_fails_clearly_when_only_example_present(
     )
     (example_dir / "instructions.md").write_text("Be useful.\n", encoding="utf-8")
 
-    assert main(["sync", "--source-root", str(agents_home)]) == 1
-    err = capsys.readouterr().err
-    assert "shared-agents init" in err
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+
+    assert (example_dir / "agent.yaml").exists()
+    assert (fake_home / ".claude" / "agents" / "needs-init.md").exists()
+    assert "created agent.yaml from agent.yaml.example" in capsys.readouterr().err
+
+
+def test_sync_dry_run_does_not_materialize_example(
+    agents_home: Path, fake_home: Path
+) -> None:
+    example_dir = agents_home / "agents" / "needs-init"
+    example_dir.mkdir(parents=True)
+    (example_dir / "agent.yaml.example").write_text(
+        "name: needs-init\ndescription: Needs init\n", encoding="utf-8"
+    )
+    (example_dir / "instructions.md").write_text("Be useful.\n", encoding="utf-8")
+
+    assert main(["sync", "--source-root", str(agents_home), "--dry-run"]) == 0
+
+    assert not (example_dir / "agent.yaml").exists()
+    assert not (fake_home / ".claude" / "agents" / "needs-init.md").exists()
+
+
+def test_scoped_clean_dry_run_does_not_materialize_example(
+    agents_home: Path,
+) -> None:
+    example_dir = agents_home / "agents" / "needs-init"
+    example_dir.mkdir(parents=True)
+    (example_dir / "agent.yaml.example").write_text(
+        "name: needs-init\ndescription: Needs init\n", encoding="utf-8"
+    )
+    (example_dir / "instructions.md").write_text("Be useful.\n", encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "clean",
+                "--source-root",
+                str(agents_home),
+                "--dry-run",
+                "--agents",
+                "needs-init",
+            ]
+        )
+        == 0
+    )
+
+    assert not (example_dir / "agent.yaml").exists()
 
 
 def test_sync_uses_copilot_home_override(

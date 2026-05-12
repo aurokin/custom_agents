@@ -38,7 +38,7 @@ def test_claude_generator_minimal(agents_home: Path) -> None:
     assert frontmatter == {
         "name": "code-reviewer",
         "description": "Reviews code for correctness and risk.",
-        "model": "opus-4.6",
+        "model": "opus-4.7",
         "effort": "high",
     }
     assert "focused code reviewer" in rendered
@@ -74,7 +74,7 @@ def test_codex_generator_minimal(agents_home: Path) -> None:
 
     assert parsed["name"] == "code-reviewer"
     assert parsed["description"] == "Reviews code for correctness and risk."
-    assert parsed["model"] == "gpt-5.4"
+    assert parsed["model"] == "gpt-5.5"
     assert parsed["model_reasoning_effort"] == "high"
     assert parsed["sandbox_mode"] == "read-only"
     assert "developer_instructions" in parsed
@@ -104,7 +104,7 @@ def test_copilot_generator_minimal(agents_home: Path) -> None:
     assert frontmatter == {
         "name": "code-reviewer",
         "description": "Reviews code for correctness and risk.",
-        "model": "gpt-5.4-high",
+        "model": "gpt-5.5-high",
     }
     assert "focused code reviewer" in rendered
 
@@ -328,7 +328,7 @@ def test_claude_generator_minimal_with_defaults(agents_home: Path) -> None:
     assert frontmatter == {
         "name": "code-reviewer",
         "description": "Reviews code for correctness and risk.",
-        "model": "opus-4.6",
+        "model": "opus-4.7",
         "effort": "high",
     }
 
@@ -340,7 +340,7 @@ def test_codex_generator_minimal_with_defaults(agents_home: Path) -> None:
 
     assert parsed["name"] == "code-reviewer"
     assert parsed["description"] == "Reviews code for correctness and risk."
-    assert parsed["model"] == "gpt-5.4"
+    assert parsed["model"] == "gpt-5.5"
     assert parsed["model_reasoning_effort"] == "high"
     assert parsed["sandbox_mode"] == "read-only"
 
@@ -353,7 +353,7 @@ def test_copilot_generator_minimal_with_defaults(agents_home: Path) -> None:
     assert frontmatter == {
         "name": "code-reviewer",
         "description": "Reviews code for correctness and risk.",
-        "model": "gpt-5.4-high",
+        "model": "gpt-5.5-high",
     }
 
 
@@ -503,7 +503,7 @@ def test_tprompt_generator_roundtrip(agents_home: Path) -> None:
 
 
 def test_repo_retrorabbit_renders_as_floating_agent(initialized_repo: Path) -> None:
-    source_dir = initialized_repo / "agents" / "retrorabbit_code_reviewer"
+    source_dir = initialized_repo / "agents" / "retrorabbit-code-reviewer"
     agent = load_agent_definition(source_dir)
 
     claude_frontmatter = _parse_frontmatter(render_claude_agent(agent))

@@ -25,11 +25,11 @@ CODEX_REASONING_VALUES = {"low", "medium", "high", "xhigh"}
 CODEX_SANDBOX_VALUES = {"read-only", "workspace-write", "danger-full-access"}
 COPILOT_TARGET_VALUES = {"vscode", "github-copilot"}
 NICKNAME_RE = re.compile(r"^[A-Za-z0-9 _-]+$")
-DEFAULT_CLAUDE_MODEL = "opus-4.6"
+DEFAULT_CLAUDE_MODEL = "opus-4.7"
 DEFAULT_CLAUDE_EFFORT = "high"
-DEFAULT_CODEX_MODEL = "gpt-5.4"
+DEFAULT_CODEX_MODEL = "gpt-5.5"
 DEFAULT_CODEX_REASONING_EFFORT = "high"
-DEFAULT_COPILOT_MODEL = "gpt-5.4-high"
+DEFAULT_COPILOT_MODEL = "gpt-5.5-high"
 COPILOT_GITHUB_TARGET = "github-copilot"
 COPILOT_VSCODE_TARGET = "vscode"
 
@@ -168,12 +168,14 @@ class AgentDefinition:
         return self.model_strategy == "pinned-defaults"
 
 
-def load_agent_definition(source_dir: Path) -> AgentDefinition:
-    agent_yaml_path = source_dir / "agent.yaml"
+def load_agent_definition(
+    source_dir: Path, *, config_filename: str = "agent.yaml"
+) -> AgentDefinition:
+    agent_yaml_path = source_dir / config_filename
     instructions_path = source_dir / "instructions.md"
 
     if not agent_yaml_path.exists():
-        raise SchemaError(f"Missing agent.yaml: {agent_yaml_path}")
+        raise SchemaError(f"Missing {config_filename}: {agent_yaml_path}")
     if not instructions_path.exists():
         raise SchemaError(f"Missing instructions.md: {instructions_path}")
 

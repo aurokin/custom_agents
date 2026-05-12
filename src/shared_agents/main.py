@@ -4,11 +4,16 @@ import argparse
 from dataclasses import dataclass
 import os
 from pathlib import Path
-import shutil
 import sys
 from typing import Any, Callable
 
-from .discover import DiscoveryError, discover_agents, resolve_source_root
+from .discover import (
+    DiscoveryError,
+    discover_agents,
+    iter_example_only_directories,
+    materialize_example_configs,
+    resolve_source_root,
+)
 from .generators.claude import write_claude_agent
 from .generators.copilot import write_copilot_agent
 from .generators.codex import write_codex_agent
@@ -29,7 +34,7 @@ from .manifest import (
     save_manifest,
 )
 from .schema import AgentDefinition
-from .selection import CLIFilters, resolve_selection
+from .selection import CLIFilters, cli_harness_set, resolve_selection
 
 
 @dataclass(frozen=True)
@@ -210,7 +215,7 @@ def _empty_desired() -> dict[str, list[ManifestEntry]]:
 
 def _empty_counters() -> dict[str, dict[str, int]]:
     return {
-        harness: {"written": 0, "unchanged": 0, "skipped": 0}
+        harness: {"written": 0, "unchanged": 0, "skipped": 0, "excluded": 0}
         for harness in HARNESS_KEYWORDS
     }
 
@@ -226,7 +231,7 @@ def _cmd_sync(
     filters: CLIFilters | None = None,
 ) -> int:
     filters = filters or CLIFilters()
-    agents = discover_agents(source_root)
+    agents = discover_agents(source_root, materialize=not dry_run)
     _check_tprompt_path_collisions(agents)
     manifest = load_manifest(source_root)
     desired = _empty_desired()
@@ -255,12 +260,18 @@ def _cmd_sync(
             counters[harness][_bucket_for(status)] += 1
 
     tprompt_bin = tprompt_executable()
-    for selection in selections:
+    tprompt_selections = resolve_selection(agents, filters, HARNESS_KEYWORDS)
+    for selection in tprompt_selections:
         agent = selection.agent
         if not agent.tprompt.enabled:
             continue
         tprompt_path = tprompt_output_path(agent)
-        if "tprompt" in selection.harnesses and tprompt_bin is not None:
+        if "tprompt" not in selection.harnesses:
+            counters["tprompt"]["excluded"] += 1
+        elif tprompt_bin is None:
+            # tprompt selected for this agent but its binary isn't on PATH.
+            counters["tprompt"]["skipped"] += 1
+        else:
             status = write_tprompt_agent(
                 tprompt_path, agent, executable=tprompt_bin, dry_run=dry_run
             )
@@ -269,13 +280,13 @@ def _cmd_sync(
                 ManifestEntry(agent=agent.name, path=str(tprompt_path))
             )
             continue
-        counters["tprompt"]["skipped"] += 1
+        # Not produced this run; leave any existing output (and manifest entry) be.
         if tprompt_path.exists():
             desired["tprompt"].append(
                 ManifestEntry(agent=agent.name, path=str(tprompt_path))
             )
 
-    if counters["tprompt"]["skipped"] > 0 and tprompt_bin is None:
+    if counters["tprompt"]["skipped"]:
         print(
             "warn: tprompt not on PATH; skipping tprompt export for "
             f"{counters['tprompt']['skipped']} agent(s)",
@@ -318,7 +329,7 @@ def _cmd_sync(
 def _format_sync_summary(
     counters: dict[str, dict[str, int]],
     removed: int,
-    link_summary,
+    link_summary: LinkSummary,
     always_on: list[str],
 ) -> str:
     parts = ["sync:"]
@@ -327,7 +338,8 @@ def _format_sync_summary(
         parts.append(f" {harness} written={c['written']} unchanged={c['unchanged']};")
     t = counters["tprompt"]
     parts.append(
-        f" tprompt written={t['written']} unchanged={t['unchanged']} skipped={t['skipped']};"
+        f" tprompt written={t['written']} unchanged={t['unchanged']}"
+        f" skipped={t['skipped']} excluded={t['excluded']};"
     )
     parts.append(f" removed={removed};")
     parts.append(
@@ -353,23 +365,25 @@ def _cmd_list(source_root: Path, filters: CLIFilters | None = None) -> int:
 
 def _cmd_init(source_root: Path, dry_run: bool) -> int:
     agents_dir = source_root / "agents"
-    verb = "would copy" if dry_run else "copy"
     summary_verb = "would copy" if dry_run else "copied"
     if not agents_dir.exists():
+        print(f"warn: no agents/ directory under {source_root}", file=sys.stderr)
         print(f"init: {summary_verb} 0, skipped 0")
         return 0
-    copied = 0
-    skipped = 0
-    for example_path in sorted(agents_dir.rglob("agent.yaml.example")):
-        target = example_path.with_name("agent.yaml")
-        if target.exists():
-            skipped += 1
-            continue
-        if not dry_run:
-            shutil.copy2(example_path, target)
-        copied += 1
-        print(f"init: {verb} {example_path} -> {target}")
-    print(f"init: {summary_verb} {copied}, skipped {skipped}")
+    pending = iter_example_only_directories(source_root)
+    skipped = len(list(agents_dir.rglob("agent.yaml.example"))) - len(pending)
+    if dry_run:
+        for source_dir in pending:
+            print(
+                f"init: would copy {source_dir / 'agent.yaml.example'} "
+                f"-> {source_dir / 'agent.yaml'}"
+            )
+        print(f"init: would copy {len(pending)}, skipped {skipped}")
+        return 0
+    created = materialize_example_configs(source_root)
+    for target in created:
+        print(f"init: copy {target.with_name('agent.yaml.example')} -> {target}")
+    print(f"init: copied {len(created)}, skipped {skipped}")
     return 0
 
 
@@ -395,10 +409,12 @@ def _cmd_clean(
     desired = _empty_desired()
 
     if filters.is_active():
-        _validate_clean_filters(filters, manifest, source_root)
+        _validate_clean_filters(
+            filters, manifest, source_root, materialize=not dry_run
+        )
         agent_universe = _manifest_agents(manifest)
         try:
-            discovered = discover_agents(source_root)
+            discovered = discover_agents(source_root, materialize=not dry_run)
         except DiscoveryError as exc:
             print(
                 f"warn: agent discovery failed during clean: {exc}; "
@@ -458,7 +474,11 @@ def _manifest_agents(manifest: Manifest) -> set[str]:
 
 
 def _validate_clean_filters(
-    filters: CLIFilters, manifest: Manifest, source_root: Path
+    filters: CLIFilters,
+    manifest: Manifest,
+    source_root: Path,
+    *,
+    materialize: bool,
 ) -> None:
     for keywords, label in (
         (filters.include_harness, "harness filter include"),
@@ -478,7 +498,10 @@ def _validate_clean_filters(
         return
     universe = _manifest_agents(manifest)
     try:
-        universe.update(agent.name for agent in discover_agents(source_root))
+        universe.update(
+            agent.name
+            for agent in discover_agents(source_root, materialize=materialize)
+        )
     except DiscoveryError:
         pass
     unknown_agents = sorted(requested_agents - universe)
@@ -506,8 +529,6 @@ def _warn_about_ghost_entries(manifest: Manifest, scope: _Scope) -> None:
         )
 
 
-
-
 @dataclass(frozen=True)
 class _Scope:
     agents: frozenset[str]
@@ -529,12 +550,7 @@ def _build_scope(filters: CLIFilters, agent_universe: set[str]) -> _Scope:
         selected_agents = set(agent_universe)
     selected_agents -= filters.exclude_agents
 
-    selected_harnesses = set(HARNESS_KEYWORDS)
-    if filters.include_harness is not None:
-        selected_harnesses &= filters.include_harness
-    selected_harnesses -= filters.exclude_harness
-    if filters.no_tprompt:
-        selected_harnesses.discard("tprompt")
+    selected_harnesses = cli_harness_set(HARNESS_KEYWORDS, filters)
 
     return _Scope(
         agents=frozenset(selected_agents),

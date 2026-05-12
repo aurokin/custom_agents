@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from shared_agents.discover import DiscoveryError, discover_agents, resolve_source_root
+from shared_agents.discover import (
+    DiscoveryError,
+    discover_agents,
+    materialize_example_configs,
+    resolve_source_root,
+)
 from tests.conftest import write_agent
 
 
@@ -58,7 +63,9 @@ def test_discover_uses_agents_home_env_when_cwd_has_no_agents(
     assert [agent.name for agent in discover_agents()] == ["env-agent"]
 
 
-def test_discover_raises_on_example_only_directory(agents_home: Path) -> None:
+def test_discover_materializes_example_only_directory(
+    agents_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     example_dir = agents_home / "agents" / "needs-init"
     example_dir.mkdir(parents=True)
     (example_dir / "agent.yaml.example").write_text(
@@ -66,12 +73,87 @@ def test_discover_raises_on_example_only_directory(agents_home: Path) -> None:
     )
     (example_dir / "instructions.md").write_text("Be useful.\n", encoding="utf-8")
 
+    agents = discover_agents(agents_home)
+
+    assert [agent.name for agent in agents] == ["needs-init"]
+    assert (example_dir / "agent.yaml").read_text(encoding="utf-8") == (
+        example_dir / "agent.yaml.example"
+    ).read_text(encoding="utf-8")
+    assert "created agent.yaml from agent.yaml.example" in capsys.readouterr().err
+    # Idempotent: a second pass copies nothing and stays quiet.
+    discover_agents(agents_home)
+    assert "created agent.yaml" not in capsys.readouterr().err
+
+
+def test_discover_can_read_example_without_materializing(
+    agents_home: Path,
+) -> None:
+    example_dir = agents_home / "agents" / "needs-init"
+    example_dir.mkdir(parents=True)
+    (example_dir / "agent.yaml.example").write_text(
+        "name: needs-init\ndescription: Needs init\n", encoding="utf-8"
+    )
+    (example_dir / "instructions.md").write_text("Be useful.\n", encoding="utf-8")
+
+    agents = discover_agents(agents_home, materialize=False)
+
+    assert [agent.name for agent in agents] == ["needs-init"]
+    assert not (example_dir / "agent.yaml").exists()
+
+
+def test_discover_ignores_stale_materialized_agent_after_rename(
+    agents_home: Path,
+) -> None:
+    new_dir = write_agent(
+        agents_home,
+        "retrorabbit-code-reviewer",
+        "name: retrorabbit-code-reviewer\ndescription: Current agent\n",
+    )
+    old_dir = agents_home / "agents" / "retrorabbit_code_reviewer"
+    old_dir.mkdir(parents=True)
+    (old_dir / "agent.yaml").write_text(
+        "name: retrorabbit_code_reviewer\ndescription: Old materialized config\n",
+        encoding="utf-8",
+    )
+
+    agents = discover_agents(agents_home)
+
+    assert [agent.name for agent in agents] == ["retrorabbit-code-reviewer"]
+    assert agents[0].source_dir == new_dir
+
+
+def test_materialize_example_configs_reports_copy_failures(
+    agents_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    example_dir = agents_home / "agents" / "needs-init"
+    example_dir.mkdir(parents=True)
+    (example_dir / "agent.yaml.example").write_text(
+        "name: needs-init\ndescription: Needs init\n", encoding="utf-8"
+    )
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise PermissionError("read-only checkout")
+
+    monkeypatch.setattr("shared_agents.discover.shutil.copy2", boom)
+
     with pytest.raises(DiscoveryError, match="shared-agents init"):
-        discover_agents(agents_home)
+        materialize_example_configs(agents_home)
 
 
-def test_repo_contains_plan_reviewer_agent(initialized_repo: Path) -> None:
+def test_repo_contains_expected_agents(initialized_repo: Path) -> None:
     agents = {agent.name: agent for agent in discover_agents(initialized_repo)}
 
-    assert "plan-reviewer" in agents
+    assert {
+        "plan-reviewer",
+        "retrorabbit-code-reviewer",
+        "codexrabbit-code-reviewer",
+    } <= set(agents)
     assert agents["plan-reviewer"].source_dir == initialized_repo / "agents" / "plan-reviewer"
+    assert (
+        agents["retrorabbit-code-reviewer"].source_dir
+        == initialized_repo / "agents" / "retrorabbit-code-reviewer"
+    )
+    assert (
+        agents["codexrabbit-code-reviewer"].source_dir
+        == initialized_repo / "agents" / "codexrabbit-code-reviewer"
+    )

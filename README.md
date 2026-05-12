@@ -7,13 +7,14 @@ definitions for Claude Code, GitHub Copilot, Codex, Cursor, and Gemini CLI from 
 
 ```bash
 python3 -m pip install -e '.[dev]'
-shared-agents init
 ```
 
-`shared-agents init` materializes each agent's `agent.yaml.example` into a
-sibling `agent.yaml`. The `.example` files are the canonical committed
-source; the materialized `agent.yaml` is gitignored so personal harness
-overrides stay local. `init` is idempotent — re-running it skips any
+Each agent's `agent.yaml` is gitignored; the committed `agent.yaml.example`
+sibling is the canonical source. Any command that reads agents (`sync`,
+`list`, `validate`, `clean`) auto-creates a missing `agent.yaml` from its
+`.example` on first run — the materialized file is then yours to edit for
+personal harness overrides. `shared-agents init` performs the same copy
+explicitly (and `init --dry-run` previews it); it never overwrites an
 `agent.yaml` that already exists, so local edits are never clobbered.
 
 ## Canonical Source Layout
@@ -24,7 +25,7 @@ overrides stay local. `init` is idempotent — re-running it skips any
 ├── agents/
 │   └── code-reviewer/
 │       ├── agent.yaml.example   # canonical, committed
-│       ├── agent.yaml            # gitignored, created by `shared-agents init`
+│       ├── agent.yaml            # gitignored, auto-created from the .example
 │       └── instructions.md
 └── skills/
 ```
@@ -32,7 +33,7 @@ overrides stay local. `init` is idempotent — re-running it skips any
 ## Commands
 
 ```bash
-shared-agents init                              # bootstrap agent.yaml from .example
+shared-agents init                              # explicitly materialize agent.yaml from .example (also auto-run by the others)
 shared-agents sync                              # all agents × all available harnesses
 shared-agents sync --link-canonical
 shared-agents list

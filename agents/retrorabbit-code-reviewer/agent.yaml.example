@@ -1,4 +1,4 @@
-name: retrorabbit_code_reviewer
+name: retrorabbit-code-reviewer
 description: Reviews code hunks for correctness, risk, and maintainability.
 defaults:
   sandbox: read-only
