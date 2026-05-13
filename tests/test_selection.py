@@ -34,6 +34,28 @@ def test_resolve_selection_default_returns_all(agents_home: Path) -> None:
         assert selection.harnesses == expected
 
 
+def test_resolve_selection_skill_export_returns_only_skill_harness(
+    agents_home: Path,
+) -> None:
+    _make_agent(agents_home, "alpha", "export: skill\n")
+    agents = discover_agents(agents_home)
+
+    selections = resolve_selection(agents, CLIFilters(), _all_harnesses())
+
+    assert selections[0].harnesses == frozenset({"claude-skills", "agent-skills"})
+
+
+def test_resolve_selection_none_export_returns_no_harnesses(
+    agents_home: Path,
+) -> None:
+    _make_agent(agents_home, "alpha", "export: none\n")
+    agents = discover_agents(agents_home)
+
+    selections = resolve_selection(agents, CLIFilters(), _all_harnesses())
+
+    assert selections[0].harnesses == frozenset()
+
+
 def test_resolve_selection_include_agents_filters_list(agents_home: Path) -> None:
     _make_agent(agents_home, "alpha")
     _make_agent(agents_home, "beta")

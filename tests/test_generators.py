@@ -14,6 +14,12 @@ from shared_agents.generators.copilot import build_copilot_frontmatter, render_c
 from shared_agents.generators.codex import build_codex_document, render_codex_agent
 from shared_agents.generators.cursor import build_cursor_frontmatter, render_cursor_agent
 from shared_agents.generators.gemini import build_gemini_frontmatter, render_gemini_agent
+from shared_agents.generators.skills import (
+    build_skill_frontmatter,
+    normalize_skill_name,
+    render_skill,
+    skill_name,
+)
 from shared_agents.generators.tprompt import (
     SUBAGENT_FOOTER,
     build_tprompt_frontmatter,
@@ -118,6 +124,76 @@ def test_copilot_generator_minimal_without_defaults(agents_home: Path) -> None:
         "name": "code-reviewer",
         "description": "Reviews code for correctness and risk.",
     }
+
+
+def test_skill_name_normalization() -> None:
+    assert normalize_skill_name("Review_Helper") == "review-helper"
+    assert normalize_skill_name("review--helper") == "review-helper"
+
+
+def test_skill_generator_minimal(agents_home: Path) -> None:
+    write_agent(
+        agents_home,
+        "reviewer",
+        "\n".join(
+            [
+                "name: code_reviewer",
+                "description: Use when reviewing code changes.",
+                "export: skill",
+            ]
+        ),
+        instructions="Review the patch carefully.\n",
+    )
+    agent = load_agent_definition(agents_home / "agents" / "reviewer")
+
+    rendered = render_skill(agent)
+    frontmatter = _parse_frontmatter(rendered)
+
+    assert skill_name(agent) == "code-reviewer"
+    assert frontmatter["name"] == "code-reviewer"
+    assert frontmatter["description"] == "Use when reviewing code changes."
+    assert frontmatter["metadata"] == {
+        "source": "custom_agents",
+        "original_name": "code_reviewer",
+    }
+    assert "# Code Reviewer" in rendered
+    assert "## Instructions" in rendered
+    assert "Review the patch carefully." in rendered
+
+
+def test_skill_generator_full_overrides(agents_home: Path) -> None:
+    write_agent(
+        agents_home,
+        "reviewer",
+        "\n".join(
+            [
+                "name: code-reviewer",
+                "description: Native agent description",
+                "export: skill",
+                "skill:",
+                "  name: review-helper",
+                "  title: Review Helper",
+                "  description: Use when reviewing a patch before merge.",
+                "  tags: [review, code]",
+                "  license: MIT",
+                "  compatibility: [agent-skills]",
+                "  metadata:",
+                "    owner: platform",
+            ]
+        ),
+    )
+    agent = load_agent_definition(agents_home / "agents" / "reviewer")
+
+    frontmatter = build_skill_frontmatter(agent)
+    rendered = render_skill(agent)
+
+    assert frontmatter["name"] == "review-helper"
+    assert frontmatter["description"] == "Use when reviewing a patch before merge."
+    assert frontmatter["tags"] == ["review", "code"]
+    assert frontmatter["license"] == "MIT"
+    assert frontmatter["compatibility"] == ["agent-skills"]
+    assert frontmatter["metadata"]["owner"] == "platform"
+    assert "# Review Helper" in rendered
 
 
 def test_codex_generator_full(agents_home: Path) -> None:

@@ -564,6 +564,176 @@ def test_sync_rejects_duplicate_tprompt_filename(
     assert "Duplicate tprompt output path" in captured.err
 
 
+def test_sync_ignores_tprompt_collisions_for_skill_exports(
+    agents_home: Path,
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    write_agent(
+        agents_home,
+        "first-agent",
+        "\n".join(
+            [
+                "name: first-agent",
+                "description: First",
+                "export: skill",
+                "tprompt:",
+                "  filename: shared-name",
+            ]
+        ),
+    )
+    write_agent(
+        agents_home,
+        "second-agent",
+        "\n".join(
+            [
+                "name: second-agent",
+                "description: Second",
+                "export: skill",
+                "skill:",
+                "  name: second-skill",
+                "tprompt:",
+                "  filename: shared-name",
+            ]
+        ),
+    )
+    _install_fake_tprompt(fake_home, monkeypatch)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+
+    assert not (fake_home / ".config" / "tprompt" / "prompts" / "shared-name-ca.md").exists()
+    assert (fake_home / ".agents" / "skills" / "first-agent" / "SKILL.md").exists()
+    assert (fake_home / ".agents" / "skills" / "second-skill" / "SKILL.md").exists()
+
+
+def test_sync_ignores_tprompt_collisions_for_none_exports(
+    agents_home: Path,
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    write_agent(
+        agents_home,
+        "first-agent",
+        "\n".join(
+            [
+                "name: first-agent",
+                "description: First",
+                "export: none",
+                "tprompt:",
+                "  filename: shared-name",
+            ]
+        ),
+    )
+    write_agent(
+        agents_home,
+        "second-agent",
+        "\n".join(
+            [
+                "name: second-agent",
+                "description: Second",
+                "export: none",
+                "tprompt:",
+                "  filename: shared-name",
+            ]
+        ),
+    )
+    _install_fake_tprompt(fake_home, monkeypatch)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+
+    assert not (fake_home / ".config" / "tprompt" / "prompts" / "shared-name-ca.md").exists()
+
+
+def test_resync_removes_tprompt_when_agent_changes_to_skill_export(
+    agents_home: Path,
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "reviewer",
+        "\n".join(
+            [
+                "name: reviewer",
+                "description: Reviewer",
+                "tprompt:",
+                "  filename: reviewer-prompt",
+            ]
+        ),
+    )
+    prompts_dir = _install_fake_tprompt(fake_home, monkeypatch)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+    target = prompts_dir / "reviewer-prompt-ca.md"
+    assert target.exists()
+
+    (source_dir / "agent.yaml").write_text(
+        "\n".join(
+            [
+                "name: reviewer",
+                "description: Reviewer",
+                "export: skill",
+                "tprompt:",
+                "  filename: reviewer-prompt",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+
+    assert not target.exists()
+    manifest = load_manifest(agents_home)
+    assert str(target) not in manifest.paths("tprompt")
+
+
+def test_resync_removes_tprompt_when_agent_changes_to_none_export(
+    agents_home: Path,
+    fake_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "reviewer",
+        "\n".join(
+            [
+                "name: reviewer",
+                "description: Reviewer",
+                "tprompt:",
+                "  filename: reviewer-prompt",
+            ]
+        ),
+    )
+    prompts_dir = _install_fake_tprompt(fake_home, monkeypatch)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_home / ".config"))
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+    target = prompts_dir / "reviewer-prompt-ca.md"
+    assert target.exists()
+
+    (source_dir / "agent.yaml").write_text(
+        "\n".join(
+            [
+                "name: reviewer",
+                "description: Reviewer",
+                "export: none",
+                "tprompt:",
+                "  filename: reviewer-prompt",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+
+    assert not target.exists()
+    manifest = load_manifest(agents_home)
+    assert str(target) not in manifest.paths("tprompt")
+
+
 def test_clean_removes_tprompt_files(
     agents_home: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1009,6 +1179,231 @@ def test_sync_with_include_harness_writes_only_selected(
     assert not (fake_home / ".copilot" / "agents" / "code-reviewer.agent.md").exists()
     assert not (fake_home / ".cursor" / "agents" / "code-reviewer.md").exists()
     assert not (fake_home / ".gemini" / "agents" / "code-reviewer.md").exists()
+
+
+def test_sync_skill_export_writes_only_skill_bundles(
+    agents_home: Path, fake_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_agent(
+        agents_home,
+        "skill-reviewer",
+        "\n".join(
+            [
+                "name: skill_reviewer",
+                "description: Use when reviewing code changes.",
+                "export: skill",
+            ]
+        ),
+        instructions="Review the patch carefully.\n",
+    )
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+
+    skill_path = fake_home / ".agents" / "skills" / "skill-reviewer" / "SKILL.md"
+    claude_skill_path = (
+        fake_home / ".claude" / "skills" / "skill-reviewer" / "SKILL.md"
+    )
+    assert skill_path.exists()
+    assert claude_skill_path.exists()
+    assert "name: skill-reviewer" in skill_path.read_text(encoding="utf-8")
+    assert "name: skill-reviewer" in claude_skill_path.read_text(encoding="utf-8")
+    assert not (fake_home / ".claude" / "agents" / "skill_reviewer.md").exists()
+    assert not (fake_home / ".codex" / "agents" / "skill_reviewer.toml").exists()
+    manifest = load_manifest(agents_home)
+    assert str(skill_path) in manifest.paths("agent-skills")
+    assert str(claude_skill_path) in manifest.paths("claude-skills")
+    out = capsys.readouterr().out
+    assert "claude-skills written=1 unchanged=0 skipped=0" in out
+    assert "agent-skills written=1 unchanged=0 skipped=0" in out
+
+
+def test_sync_none_export_writes_nothing(
+    agents_home: Path, fake_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_agent(
+        agents_home,
+        "quiet-reviewer",
+        "name: quiet-reviewer\ndescription: Quiet\nexport: none\n",
+    )
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+
+    assert not (fake_home / ".claude" / "agents" / "quiet-reviewer.md").exists()
+    assert not (fake_home / ".agents" / "skills" / "quiet-reviewer").exists()
+    out = capsys.readouterr().out
+    assert "claude written=0 unchanged=0" in out
+    assert "claude-skills written=0 unchanged=0 skipped=0" in out
+    assert "agent-skills written=0 unchanged=0 skipped=0" in out
+
+
+def test_sync_rejects_skill_name_collisions(
+    agents_home: Path, fake_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_agent(
+        agents_home,
+        "alpha",
+        "name: review_helper\ndescription: Alpha\nexport: skill\n",
+    )
+    write_agent(
+        agents_home,
+        "beta",
+        "name: review-helper\ndescription: Beta\nexport: skill\n",
+    )
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 1
+
+    assert "Duplicate skill output path" in capsys.readouterr().err
+
+
+def test_scoped_sync_rejects_out_of_scope_skill_name_collisions(
+    agents_home: Path, fake_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_agent(
+        agents_home,
+        "alpha",
+        "name: review_helper\ndescription: Alpha\nexport: skill\n",
+    )
+    write_agent(
+        agents_home,
+        "beta",
+        "name: review-helper\ndescription: Beta\nexport: skill\n",
+    )
+
+    assert (
+        main(["sync", "--source-root", str(agents_home), "--agents", "review_helper"]) == 1
+    )
+
+    assert "Duplicate skill output path" in capsys.readouterr().err
+
+
+def test_sync_allows_same_skill_name_for_disjoint_skill_harnesses(
+    agents_home: Path, fake_home: Path
+) -> None:
+    write_agent(
+        agents_home,
+        "alpha",
+        "\n".join(
+            [
+                "name: alpha",
+                "description: Alpha",
+                "export: skill",
+                "harness:",
+                "  include: [agent-skills]",
+                "skill:",
+                "  name: shared-reviewer",
+            ]
+        ),
+    )
+    write_agent(
+        agents_home,
+        "beta",
+        "\n".join(
+            [
+                "name: beta",
+                "description: Beta",
+                "export: skill",
+                "harness:",
+                "  include: [claude-skills]",
+                "skill:",
+                "  name: shared-reviewer",
+            ]
+        ),
+    )
+
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+
+    assert (
+        fake_home / ".agents" / "skills" / "shared-reviewer" / "SKILL.md"
+    ).exists()
+    assert (
+        fake_home / ".claude" / "skills" / "shared-reviewer" / "SKILL.md"
+    ).exists()
+
+
+def test_clean_agent_skills_removes_owned_empty_directory(
+    agents_home: Path, fake_home: Path
+) -> None:
+    write_agent(
+        agents_home,
+        "skill-reviewer",
+        "name: skill-reviewer\ndescription: Skill\nexport: skill\n",
+    )
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+    skill_dir = fake_home / ".agents" / "skills" / "skill-reviewer"
+    assert (skill_dir / "SKILL.md").exists()
+
+    assert (
+        main(
+            [
+                "clean",
+                "--source-root",
+                str(agents_home),
+                "--harness",
+                "agent-skills",
+            ]
+        )
+        == 0
+    )
+
+    assert not skill_dir.exists()
+
+
+def test_clean_agent_skills_preserves_unmanaged_files(
+    agents_home: Path, fake_home: Path
+) -> None:
+    write_agent(
+        agents_home,
+        "skill-reviewer",
+        "name: skill-reviewer\ndescription: Skill\nexport: skill\n",
+    )
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+    skill_dir = fake_home / ".agents" / "skills" / "skill-reviewer"
+    unmanaged = skill_dir / "notes.md"
+    unmanaged.write_text("keep me\n", encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "clean",
+                "--source-root",
+                str(agents_home),
+                "--harness",
+                "agent-skills",
+            ]
+        )
+        == 0
+    )
+
+    assert not (skill_dir / "SKILL.md").exists()
+    assert unmanaged.exists()
+
+
+def test_clean_claude_skills_removes_owned_empty_directory(
+    agents_home: Path, fake_home: Path
+) -> None:
+    write_agent(
+        agents_home,
+        "skill-reviewer",
+        "name: skill-reviewer\ndescription: Skill\nexport: skill\n",
+    )
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+    skill_dir = fake_home / ".claude" / "skills" / "skill-reviewer"
+    assert (skill_dir / "SKILL.md").exists()
+
+    assert (
+        main(
+            [
+                "clean",
+                "--source-root",
+                str(agents_home),
+                "--harness",
+                "claude-skills",
+            ]
+        )
+        == 0
+    )
+
+    assert not skill_dir.exists()
 
 
 def test_sync_harness_flag_repeatable(agents_home: Path, fake_home: Path) -> None:

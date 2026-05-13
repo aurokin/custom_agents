@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from .harnesses import HARNESS_KEYWORDS
+from .harnesses import HARNESS_KEYWORDS, SKILL_HARNESS_KEYWORDS
 from .schema import AgentDefinition
 
 
@@ -74,6 +74,13 @@ def resolve_selection(
             base &= set(agent.harness.include)
         if agent.harness.exclude:
             base -= set(agent.harness.exclude)
+
+        if agent.export == "agent":
+            base -= set(SKILL_HARNESS_KEYWORDS)
+        elif agent.export == "skill":
+            base &= set(SKILL_HARNESS_KEYWORDS)
+        elif agent.export == "none":
+            base.clear()
 
         if "tprompt" in base and not agent.tprompt.enabled:
             base.discard("tprompt")

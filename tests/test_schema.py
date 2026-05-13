@@ -546,8 +546,145 @@ def test_schema_harness_defaults_to_empty(agents_home: Path) -> None:
 
     agent = load_agent_definition(source_dir)
 
+    assert agent.export == "agent"
     assert agent.harness.include is None
     assert agent.harness.exclude is None
+
+
+def test_schema_export_accepts_skill_and_none(agents_home: Path) -> None:
+    skill_source = write_agent(
+        agents_home,
+        "skill-export",
+        "name: skill-export\ndescription: Skill export\nexport: skill\n",
+    )
+    none_source = write_agent(
+        agents_home,
+        "none-export",
+        "name: none-export\ndescription: None export\nexport: none\n",
+    )
+
+    assert load_agent_definition(skill_source).export == "skill"
+    assert load_agent_definition(none_source).export == "none"
+
+
+def test_schema_export_rejects_unknown_value(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "bad-export",
+        "name: bad-export\ndescription: Bad export\nexport: both\n",
+    )
+
+    with pytest.raises(SchemaError, match="Invalid export"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_skill_config_parses(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "skill-config",
+        "\n".join(
+            [
+                "name: skill-config",
+                "description: Has skill config",
+                "export: skill",
+                "skill:",
+                "  name: review-helper",
+                "  title: Review Helper",
+                "  description: Use when reviewing code.",
+                "  tags: [review, code]",
+                "  license: MIT",
+                "  compatibility: [agent-skills]",
+                "  metadata:",
+                "    owner: platform",
+            ]
+        ),
+    )
+
+    agent = load_agent_definition(source_dir)
+
+    assert agent.skill.name == "review-helper"
+    assert agent.skill.title == "Review Helper"
+    assert agent.skill.description == "Use when reviewing code."
+    assert agent.skill.tags == ["review", "code"]
+    assert agent.skill.license == "MIT"
+    assert agent.skill.compatibility == ["agent-skills"]
+    assert agent.skill.metadata == {"owner": "platform"}
+
+
+def test_schema_skill_config_rejects_unknown_subkey(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "bad-skill",
+        "\n".join(
+            [
+                "name: bad-skill",
+                "description: Has bad skill config",
+                "skill:",
+                "  enabled: true",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="Unknown skill keys"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_skill_config_rejects_invalid_name(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "bad-skill-name",
+        "\n".join(
+            [
+                "name: bad-skill-name",
+                "description: Bad skill name",
+                "export: skill",
+                "skill:",
+                "  name: 'bad name'",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="Invalid skill name"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_skill_config_rejects_too_long_name(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "long-skill-name",
+        "\n".join(
+            [
+                "name: long-skill-name",
+                "description: Long skill name",
+                "export: skill",
+                "skill:",
+                f"  name: {'a' * 65}",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="Invalid skill name"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_skill_export_rejects_too_long_implicit_skill_name(
+    agents_home: Path,
+) -> None:
+    long_name = "a" * 65
+    source_dir = write_agent(
+        agents_home,
+        "long-implicit-skill-name",
+        "\n".join(
+            [
+                f"name: {long_name}",
+                "description: Long implicit skill name",
+                "export: skill",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="Invalid skill name"):
+        load_agent_definition(source_dir)
 
 
 def test_schema_harness_include_parses(agents_home: Path) -> None:

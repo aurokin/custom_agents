@@ -8,10 +8,12 @@ from shared_agents import harnesses
 def test_harness_keywords_contents() -> None:
     assert harnesses.HARNESS_KEYWORDS == (
         "claude",
+        "claude-skills",
         "codex",
         "copilot",
         "cursor",
         "gemini",
+        "agent-skills",
         "tprompt",
     )
 
@@ -23,7 +25,15 @@ def test_available_harnesses_includes_always_on(
 
     available = harnesses.available_harnesses()
 
-    assert available == ("claude", "codex", "copilot", "cursor", "gemini")
+    assert available == (
+        "claude",
+        "claude-skills",
+        "codex",
+        "copilot",
+        "cursor",
+        "gemini",
+        "agent-skills",
+    )
 
 
 def test_available_harnesses_includes_tprompt_when_probe_passes(

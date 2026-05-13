@@ -11,6 +11,9 @@ from .harnesses import HARNESS_KEYWORDS
 
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+_SKILL_SEPARATOR_RE = re.compile(r"[-_]+")
+EXPORT_MODE_VALUES = {"agent", "skill", "none"}
 SHARED_SANDBOX_VALUES = {"read-only", "workspace-write", "full-access"}
 MODEL_STRATEGY_VALUES = {"pinned-defaults", "floating"}
 CLAUDE_PERMISSION_VALUES = {
@@ -36,6 +39,20 @@ COPILOT_VSCODE_TARGET = "vscode"
 
 class SchemaError(ValueError):
     """Raised when an agent definition is invalid."""
+
+
+def normalize_skill_name(value: str) -> str:
+    normalized = _SKILL_SEPARATOR_RE.sub("-", value.strip().lower()).strip("-")
+    if (
+        not normalized
+        or len(normalized) > 64
+        or not SKILL_NAME_RE.fullmatch(normalized)
+    ):
+        raise SchemaError(
+            f"Invalid skill name after normalization: {value!r}. "
+            "Use 1-64 lowercase letters and digits separated by single hyphens."
+        )
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -101,6 +118,17 @@ class HarnessConfig:
 
 
 @dataclass(frozen=True)
+class SkillConfig:
+    name: str | None = None
+    description: str | None = None
+    title: str | None = None
+    tags: list[str] | None = None
+    license: str | None = None
+    compatibility: str | list[str] | None = None
+    metadata: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class TpromptConfig:
     enabled: bool = False
     title: str | None = None
@@ -118,6 +146,7 @@ class AgentDefinition:
     description: str
     instructions: str
     source_dir: Path
+    export: str
     sandbox: str
     model_strategy: str
     skills: list[str]
@@ -128,6 +157,7 @@ class AgentDefinition:
     gemini: GeminiConfig
     tprompt: TpromptConfig
     harness: HarnessConfig
+    skill: SkillConfig
 
     def resolved_cursor_readonly(self) -> bool | None:
         if self.cursor.readonly is not None:
@@ -186,6 +216,12 @@ def load_agent_definition(
     instructions = instructions_path.read_text(encoding="utf-8")
     if not instructions.strip():
         raise SchemaError(f"instructions.md is empty: {instructions_path}")
+    export = _optional_str(raw, "export", agent_yaml_path) or "agent"
+    if export not in EXPORT_MODE_VALUES:
+        allowed = ", ".join(sorted(EXPORT_MODE_VALUES))
+        raise SchemaError(
+            f"Invalid export in {agent_yaml_path}: {export!r} (allowed: {allowed})"
+        )
 
     defaults_raw = _optional_mapping(raw, "defaults", agent_yaml_path)
     defaults_unknown = set(defaults_raw) - {"sandbox", "skills", "model_strategy"}
@@ -415,10 +451,12 @@ def load_agent_definition(
     _validate_gemini_config(gemini, agent_yaml_path)
 
     harness = _load_harness_config(raw, agent_yaml_path)
+    skill = _load_skill_config(raw, agent_yaml_path)
 
     unknown_top_level = set(raw) - {
         "name",
         "description",
+        "export",
         "defaults",
         "claude",
         "codex",
@@ -427,6 +465,7 @@ def load_agent_definition(
         "gemini",
         "tprompt",
         "harness",
+        "skill",
     }
     if unknown_top_level:
         unknown_keys = ", ".join(sorted(unknown_top_level))
@@ -437,6 +476,7 @@ def load_agent_definition(
         description=description,
         instructions=instructions,
         source_dir=source_dir,
+        export=export,
         sandbox=sandbox,
         model_strategy=model_strategy,
         skills=skills,
@@ -447,6 +487,43 @@ def load_agent_definition(
         gemini=gemini,
         tprompt=tprompt,
         harness=harness,
+        skill=skill,
+    )
+
+
+def _load_skill_config(raw: dict[str, Any], path: Path) -> SkillConfig:
+    export = _optional_str(raw, "export", path) or "agent"
+    if "skill" not in raw:
+        if export == "skill":
+            normalize_skill_name(_required_str(raw, "name", path))
+        return SkillConfig()
+    skill_raw = _optional_mapping(raw, "skill", path)
+    unknown = set(skill_raw) - {
+        "name",
+        "description",
+        "title",
+        "tags",
+        "license",
+        "compatibility",
+        "metadata",
+    }
+    if unknown:
+        unknown_keys = ", ".join(sorted(unknown))
+        raise SchemaError(f"Unknown skill keys in {path}: {unknown_keys}")
+    compatibility = _optional_str_or_str_list(skill_raw, "compatibility", path)
+    name = _optional_str(skill_raw, "name", path)
+    if export == "skill":
+        normalize_skill_name(name or _required_str(raw, "name", path))
+    elif name is not None:
+        normalize_skill_name(name)
+    return SkillConfig(
+        name=name,
+        description=_optional_str(skill_raw, "description", path),
+        title=_optional_str(skill_raw, "title", path),
+        tags=_optional_str_list(skill_raw, "tags", path),
+        license=_optional_str(skill_raw, "license", path),
+        compatibility=compatibility,
+        metadata=_optional_str_mapping(skill_raw, "metadata", path),
     )
 
 
@@ -582,6 +659,31 @@ def _optional_str_list(
             raise SchemaError(f"Expected every item in {key!r} to be a string in {path}")
         items.append(item.strip())
     return items
+
+
+def _optional_str_or_str_list(
+    data: dict[str, Any], key: str, path: Path
+) -> str | list[str] | None:
+    if key not in data or data[key] is None:
+        return None
+    value = data[key]
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            raise SchemaError(f"Expected {key!r} to be non-empty in {path}")
+        return stripped
+    if isinstance(value, list):
+        items: list[str] = []
+        for item in value:
+            if not isinstance(item, str) or not item.strip():
+                raise SchemaError(
+                    f"Expected every item in {key!r} to be a string in {path}"
+                )
+            items.append(item.strip())
+        if not items:
+            raise SchemaError(f"Expected {key!r} list to be non-empty in {path}")
+        return items
+    raise SchemaError(f"Expected {key!r} to be a string or list in {path}")
 
 
 def _optional_dict_list(

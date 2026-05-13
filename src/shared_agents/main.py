@@ -19,12 +19,19 @@ from .generators.copilot import write_copilot_agent
 from .generators.codex import write_codex_agent
 from .generators.cursor import write_cursor_agent
 from .generators.gemini import write_gemini_agent
+from .generators.skills import (
+    claude_skill_output_path,
+    resolve_agent_skills_dir,
+    resolve_claude_skills_dir,
+    skill_output_path,
+    write_agent_skill,
+)
 from .generators.tprompt import (
     tprompt_executable,
     tprompt_output_path,
     write_tprompt_agent,
 )
-from .harnesses import HARNESS_KEYWORDS, available_harnesses
+from .harnesses import HARNESS_KEYWORDS, SKILL_HARNESS_KEYWORDS, available_harnesses
 from .linker import LinkSummary, prune_stale_links, sync_links
 from .manifest import (
     Manifest,
@@ -63,13 +70,23 @@ def _gemini_path(agent: AgentDefinition) -> Path:
     return Path.home() / ".gemini" / "agents" / f"{agent.output_name}.md"
 
 
+def _agent_skill_path(agent: AgentDefinition) -> Path:
+    return skill_output_path(agent)
+
+
+def _claude_skill_path(agent: AgentDefinition) -> Path:
+    return claude_skill_output_path(agent)
+
+
 def _always_on_writers() -> dict[str, HarnessWriter]:
     return {
         "claude": HarnessWriter(path=_claude_path, write=write_claude_agent),
+        "claude-skills": HarnessWriter(path=_claude_skill_path, write=write_agent_skill),
         "copilot": HarnessWriter(path=_copilot_path, write=write_copilot_agent),
         "codex": HarnessWriter(path=_codex_path, write=write_codex_agent),
         "cursor": HarnessWriter(path=_cursor_path, write=write_cursor_agent),
         "gemini": HarnessWriter(path=_gemini_path, write=write_gemini_agent),
+        "agent-skills": HarnessWriter(path=_agent_skill_path, write=write_agent_skill),
     }
 
 
@@ -241,6 +258,7 @@ def _cmd_sync(
     selections = resolve_selection(
         agents, filters, available_harnesses()
     )
+    _check_skill_path_collisions(agents)
 
     scope = (
         _build_scope(filters, {agent.name for agent in agents})
@@ -268,6 +286,8 @@ def _cmd_sync(
         tprompt_path = tprompt_output_path(agent)
         if "tprompt" not in selection.harnesses:
             counters["tprompt"]["excluded"] += 1
+            if agent.export != "agent":
+                continue
         elif tprompt_bin is None:
             # tprompt selected for this agent but its binary isn't on PATH.
             counters["tprompt"]["skipped"] += 1
@@ -335,7 +355,13 @@ def _format_sync_summary(
     parts = ["sync:"]
     for harness in always_on:
         c = counters[harness]
-        parts.append(f" {harness} written={c['written']} unchanged={c['unchanged']};")
+        if harness in SKILL_HARNESS_KEYWORDS:
+            parts.append(
+                f" {harness} written={c['written']} unchanged={c['unchanged']}"
+                f" skipped={c['skipped']};"
+            )
+        else:
+            parts.append(f" {harness} written={c['written']} unchanged={c['unchanged']};")
     t = counters["tprompt"]
     parts.append(
         f" tprompt written={t['written']} unchanged={t['unchanged']}"
@@ -605,14 +631,58 @@ def _remove_stale_generated_files(
             if path.exists() or path.is_symlink():
                 if not dry_run:
                     path.unlink()
+                    _prune_empty_generated_parent(path, consumer)
                 removed += 1
                 print(f"remove generated {path}")
     return removed
 
 
+def _prune_empty_generated_parent(path: Path, consumer: str) -> None:
+    if consumer not in SKILL_HARNESS_KEYWORDS:
+        return
+    roots = {
+        "agent-skills": resolve_agent_skills_dir,
+        "claude-skills": resolve_claude_skills_dir,
+    }
+    root = roots[consumer]()
+    try:
+        path.parent.relative_to(root)
+    except ValueError:
+        return
+    for directory in (path.parent, root):
+        try:
+            directory.rmdir()
+        except OSError:
+            break
+
+
+def _check_skill_path_collisions(agents: list[AgentDefinition]) -> None:
+    seen: dict[str, str] = {}
+    selections = resolve_selection(agents, CLIFilters(), HARNESS_KEYWORDS)
+    for selection in selections:
+        for harness in SKILL_HARNESS_KEYWORDS:
+            if harness not in selection.harnesses:
+                continue
+            path = str(_skill_path_for_harness(harness, selection.agent))
+            if path in seen:
+                raise DiscoveryError(
+                    f"Duplicate skill output path {path!r} for agents "
+                    f"{seen[path]!r} and {selection.agent.name!r}; set a unique skill.name."
+                )
+            seen[path] = selection.agent.name
+
+
+def _skill_path_for_harness(harness: str, agent: AgentDefinition) -> Path:
+    if harness == "claude-skills":
+        return claude_skill_output_path(agent)
+    return skill_output_path(agent)
+
+
 def _check_tprompt_path_collisions(agents: list[AgentDefinition]) -> None:
     seen: dict[str, str] = {}
     for agent in agents:
+        if agent.export != "agent":
+            continue
         if not agent.tprompt.enabled:
             continue
         path = str(tprompt_output_path(agent))

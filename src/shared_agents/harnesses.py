@@ -5,12 +5,16 @@ from typing import Callable
 
 HARNESS_KEYWORDS: tuple[str, ...] = (
     "claude",
+    "claude-skills",
     "codex",
     "copilot",
     "cursor",
     "gemini",
+    "agent-skills",
     "tprompt",
 )
+
+SKILL_HARNESS_KEYWORDS: tuple[str, ...] = ("claude-skills", "agent-skills")
 
 
 def _always_available() -> bool:
@@ -26,10 +30,12 @@ def _tprompt_available() -> bool:
 
 AVAILABILITY_PROBES: dict[str, Callable[[], bool]] = {
     "claude": _always_available,
+    "claude-skills": _always_available,
     "codex": _always_available,
     "copilot": _always_available,
     "cursor": _always_available,
     "gemini": _always_available,
+    "agent-skills": _always_available,
     "tprompt": _tprompt_available,
 }
 
