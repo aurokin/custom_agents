@@ -30,6 +30,16 @@ explicitly (and `init --dry-run` previews it); it never overwrites an
 └── skills/
 ```
 
+## Agent Inventory
+
+The repository currently ships these canonical shared agents:
+
+| Agent | Purpose |
+|-------|---------|
+| `plan-reviewer` | Skeptical review of implementation plans, design docs, or technical proposals. |
+| `retrorabbit-code-reviewer` | Reviews code hunks for correctness, risk, and maintainability. |
+| `codexrabbit-code-reviewer` | Lightweight code reviewer that emits prioritized, structured findings based on Codex's built-in review rubric. |
+
 ## Commands
 
 ```bash
