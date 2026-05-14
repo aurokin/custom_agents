@@ -7,6 +7,9 @@ from .harnesses import HARNESS_KEYWORDS, SKILL_HARNESS_KEYWORDS
 from .schema import AgentDefinition
 
 
+OPT_IN_SKILL_HARNESS_KEYWORDS: frozenset[str] = frozenset({"hermes-skills"})
+
+
 @dataclass(frozen=True)
 class CLIFilters:
     include_agents: frozenset[str] | None = None
@@ -78,7 +81,10 @@ def resolve_selection(
         if agent.export == "agent":
             base -= set(SKILL_HARNESS_KEYWORDS)
         elif agent.export == "skill":
-            base &= set(SKILL_HARNESS_KEYWORDS)
+            allowed_skill_harnesses = set(SKILL_HARNESS_KEYWORDS)
+            if not _has_explicit_opt_in_skill_harness(filters, agent):
+                allowed_skill_harnesses -= set(OPT_IN_SKILL_HARNESS_KEYWORDS)
+            base &= allowed_skill_harnesses
         elif agent.export == "none":
             base.clear()
 
@@ -87,6 +93,14 @@ def resolve_selection(
 
         result.append(AgentSelection(agent=agent, harnesses=frozenset(base)))
     return result
+
+
+def _has_explicit_opt_in_skill_harness(
+    filters: CLIFilters, agent: AgentDefinition
+) -> bool:
+    requested = set(filters.include_harness or ())
+    requested.update(agent.harness.include or ())
+    return bool(requested & set(OPT_IN_SKILL_HARNESS_KEYWORDS))
 
 
 def _validate_harness_keywords(

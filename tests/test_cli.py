@@ -847,7 +847,7 @@ def test_clean_rejects_unknown_harness(
                 "--source-root",
                 str(agents_home),
                 "--harness",
-                "hermes",
+                "llama",
             ]
         )
         == 1
@@ -1203,8 +1203,12 @@ def test_sync_skill_export_writes_only_skill_bundles(
     claude_skill_path = (
         fake_home / ".claude" / "skills" / "skill-reviewer" / "SKILL.md"
     )
+    hermes_skill_path = (
+        fake_home / ".hermes" / "skills" / "skill-reviewer" / "SKILL.md"
+    )
     assert skill_path.exists()
     assert claude_skill_path.exists()
+    assert not hermes_skill_path.exists()
     assert "name: skill-reviewer" in skill_path.read_text(encoding="utf-8")
     assert "name: skill-reviewer" in claude_skill_path.read_text(encoding="utf-8")
     assert not (fake_home / ".claude" / "agents" / "skill_reviewer.md").exists()
@@ -1212,9 +1216,77 @@ def test_sync_skill_export_writes_only_skill_bundles(
     manifest = load_manifest(agents_home)
     assert str(skill_path) in manifest.paths("agent-skills")
     assert str(claude_skill_path) in manifest.paths("claude-skills")
+    assert manifest.paths("hermes-skills") == []
     out = capsys.readouterr().out
     assert "claude-skills written=1 unchanged=0 skipped=0" in out
     assert "agent-skills written=1 unchanged=0 skipped=0" in out
+    assert "hermes-skills written=0 unchanged=0 skipped=0" in out
+
+
+def test_sync_hermes_skills_uses_hermes_home(
+    agents_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hermes_home = tmp_path / "hermes-profile"
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    write_agent(
+        agents_home,
+        "skill-reviewer",
+        "name: skill-reviewer\ndescription: Skill\nexport: skill\n",
+    )
+
+    assert (
+        main(
+            [
+                "sync",
+                "--source-root",
+                str(agents_home),
+                "--harness",
+                "hermes-skills",
+            ]
+        )
+        == 0
+    )
+
+    target = hermes_home / "skills" / "skill-reviewer" / "SKILL.md"
+    assert target.exists()
+    assert "name: skill-reviewer" in target.read_text(encoding="utf-8")
+    frontmatter = yaml.safe_load(target.read_text(encoding="utf-8").split("---")[1])
+    assert frontmatter["metadata"]["hermes"] == {
+        "generated_by": "custom_agents",
+        "source_agent": "skill-reviewer",
+    }
+    manifest = load_manifest(agents_home)
+    assert manifest.paths("agent-skills") == []
+    assert str(target) in manifest.paths("hermes-skills")
+
+
+def test_sync_hermes_skills_cli_opt_in_does_not_self_collide(
+    agents_home: Path, fake_home: Path
+) -> None:
+    write_agent(
+        agents_home,
+        "skill-reviewer",
+        "name: skill-reviewer\ndescription: Skill\nexport: skill\n",
+    )
+
+    assert (
+        main(
+            [
+                "sync",
+                "--source-root",
+                str(agents_home),
+                "--harness",
+                "hermes-skills",
+            ]
+        )
+        == 0
+    )
+
+    assert (
+        fake_home / ".hermes" / "skills" / "skill-reviewer" / "SKILL.md"
+    ).exists()
 
 
 def test_sync_none_export_writes_nothing(
@@ -1234,6 +1306,7 @@ def test_sync_none_export_writes_nothing(
     assert "claude written=0 unchanged=0" in out
     assert "claude-skills written=0 unchanged=0 skipped=0" in out
     assert "agent-skills written=0 unchanged=0 skipped=0" in out
+    assert "hermes-skills written=0 unchanged=0 skipped=0" in out
 
 
 def test_sync_rejects_skill_name_collisions(
@@ -1271,6 +1344,81 @@ def test_scoped_sync_rejects_out_of_scope_skill_name_collisions(
 
     assert (
         main(["sync", "--source-root", str(agents_home), "--agents", "review_helper"]) == 1
+    )
+
+    assert "Duplicate skill output path" in capsys.readouterr().err
+
+
+def test_scoped_sync_single_skill_agent_does_not_self_collide(
+    agents_home: Path, fake_home: Path
+) -> None:
+    write_agent(
+        agents_home,
+        "skill-reviewer",
+        "name: skill-reviewer\ndescription: Skill\nexport: skill\n",
+    )
+
+    assert (
+        main(
+            [
+                "sync",
+                "--source-root",
+                str(agents_home),
+                "--agents",
+                "skill-reviewer",
+            ]
+        )
+        == 0
+    )
+
+    assert (
+        fake_home / ".agents" / "skills" / "skill-reviewer" / "SKILL.md"
+    ).exists()
+
+
+def test_sync_rejects_hermes_skill_collision_from_cli_opt_in(
+    agents_home: Path, fake_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_agent(
+        agents_home,
+        "alpha",
+        "\n".join(
+            [
+                "name: alpha",
+                "description: Alpha",
+                "export: skill",
+                "harness:",
+                "  include: [hermes-skills]",
+                "skill:",
+                "  name: shared-reviewer",
+            ]
+        ),
+    )
+    write_agent(
+        agents_home,
+        "beta",
+        "\n".join(
+            [
+                "name: beta",
+                "description: Beta",
+                "export: skill",
+                "skill:",
+                "  name: shared-reviewer",
+            ]
+        ),
+    )
+
+    assert (
+        main(
+            [
+                "sync",
+                "--source-root",
+                str(agents_home),
+                "--harness",
+                "hermes-skills",
+            ]
+        )
+        == 1
     )
 
     assert "Duplicate skill output path" in capsys.readouterr().err
@@ -1317,6 +1465,9 @@ def test_sync_allows_same_skill_name_for_disjoint_skill_harnesses(
     ).exists()
     assert (
         fake_home / ".claude" / "skills" / "shared-reviewer" / "SKILL.md"
+    ).exists()
+    assert not (
+        fake_home / ".hermes" / "skills" / "shared-reviewer" / "SKILL.md"
     ).exists()
 
 
@@ -1404,6 +1555,44 @@ def test_clean_claude_skills_removes_owned_empty_directory(
     )
 
     assert not skill_dir.exists()
+
+
+def test_clean_hermes_skills_preserves_unmanaged_files(
+    agents_home: Path, fake_home: Path
+) -> None:
+    write_agent(
+        agents_home,
+        "skill-reviewer",
+        "\n".join(
+            [
+                "name: skill-reviewer",
+                "description: Skill",
+                "export: skill",
+                "harness:",
+                "  include: [hermes-skills]",
+            ]
+        ),
+    )
+    assert main(["sync", "--source-root", str(agents_home)]) == 0
+    skill_dir = fake_home / ".hermes" / "skills" / "skill-reviewer"
+    unmanaged = skill_dir / "notes.md"
+    unmanaged.write_text("keep me\n", encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "clean",
+                "--source-root",
+                str(agents_home),
+                "--harness",
+                "hermes-skills",
+            ]
+        )
+        == 0
+    )
+
+    assert not (skill_dir / "SKILL.md").exists()
+    assert unmanaged.exists()
 
 
 def test_sync_harness_flag_repeatable(agents_home: Path, fake_home: Path) -> None:
@@ -1525,7 +1714,7 @@ def test_sync_rejects_unknown_harness_flag(
     install_fixture(agents_home, "minimal-agent")
 
     assert (
-        main(["sync", "--source-root", str(agents_home), "--harness", "hermes"]) == 1
+        main(["sync", "--source-root", str(agents_home), "--harness", "llama"]) == 1
     )
     err = capsys.readouterr().err
     assert "Unknown harness keyword" in err

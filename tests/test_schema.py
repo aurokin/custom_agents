@@ -874,7 +874,7 @@ def test_schema_harness_rejects_unknown_keyword(agents_home: Path) -> None:
                 "name: bad-keyword",
                 "description: Unknown keyword",
                 "harness:",
-                "  include: [claude, hermes]",
+                "  include: [claude, llama]",
             ]
         ),
     )

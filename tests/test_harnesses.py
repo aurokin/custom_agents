@@ -15,6 +15,7 @@ def test_harness_keywords_contents() -> None:
         "opencode",
         "gemini",
         "agent-skills",
+        "hermes-skills",
         "tprompt",
     )
 
@@ -35,6 +36,7 @@ def test_available_harnesses_includes_always_on(
         "opencode",
         "gemini",
         "agent-skills",
+        "hermes-skills",
     )
 
 

@@ -22,10 +22,13 @@ from .generators.gemini import write_gemini_agent
 from .generators.opencode import write_opencode_agent
 from .generators.skills import (
     claude_skill_output_path,
+    hermes_skill_output_path,
     resolve_agent_skills_dir,
     resolve_claude_skills_dir,
+    resolve_hermes_skills_dir,
     skill_output_path,
     write_agent_skill,
+    write_hermes_skill,
 )
 from .generators.tprompt import (
     tprompt_executable,
@@ -42,7 +45,7 @@ from .manifest import (
     save_manifest,
 )
 from .schema import AgentDefinition
-from .selection import CLIFilters, cli_harness_set, resolve_selection
+from .selection import AgentSelection, CLIFilters, cli_harness_set, resolve_selection
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,10 @@ def _claude_skill_path(agent: AgentDefinition) -> Path:
     return claude_skill_output_path(agent)
 
 
+def _hermes_skill_path(agent: AgentDefinition) -> Path:
+    return hermes_skill_output_path(agent)
+
+
 def _always_on_writers() -> dict[str, HarnessWriter]:
     return {
         "claude": HarnessWriter(path=_claude_path, write=write_claude_agent),
@@ -93,6 +100,9 @@ def _always_on_writers() -> dict[str, HarnessWriter]:
         "opencode": HarnessWriter(path=_opencode_path, write=write_opencode_agent),
         "gemini": HarnessWriter(path=_gemini_path, write=write_gemini_agent),
         "agent-skills": HarnessWriter(path=_agent_skill_path, write=write_agent_skill),
+        "hermes-skills": HarnessWriter(
+            path=_hermes_skill_path, write=write_hermes_skill
+        ),
     }
 
 
@@ -264,7 +274,7 @@ def _cmd_sync(
     selections = resolve_selection(
         agents, filters, available_harnesses()
     )
-    _check_skill_path_collisions(agents)
+    _check_skill_path_collisions(agents, filters)
 
     scope = (
         _build_scope(filters, {agent.name for agent in agents})
@@ -649,6 +659,7 @@ def _prune_empty_generated_parent(path: Path, consumer: str) -> None:
     roots = {
         "agent-skills": resolve_agent_skills_dir,
         "claude-skills": resolve_claude_skills_dir,
+        "hermes-skills": resolve_hermes_skills_dir,
     }
     root = roots[consumer]()
     try:
@@ -662,14 +673,27 @@ def _prune_empty_generated_parent(path: Path, consumer: str) -> None:
             break
 
 
-def _check_skill_path_collisions(agents: list[AgentDefinition]) -> None:
-    seen: dict[str, str] = {}
+def _check_skill_path_collisions(
+    agents: list[AgentDefinition], filters: CLIFilters
+) -> None:
     selections = resolve_selection(agents, CLIFilters(), HARNESS_KEYWORDS)
+    if filters.is_active():
+        selections.extend(resolve_selection(agents, filters, HARNESS_KEYWORDS))
+    _check_skill_selection_path_collisions(selections)
+
+
+def _check_skill_selection_path_collisions(selections: list[AgentSelection]) -> None:
+    seen: dict[str, str] = {}
+    checked: set[tuple[str, str, str]] = set()
     for selection in selections:
         for harness in SKILL_HARNESS_KEYWORDS:
             if harness not in selection.harnesses:
                 continue
             path = str(_skill_path_for_harness(harness, selection.agent))
+            observation = (selection.agent.name, harness, path)
+            if observation in checked:
+                continue
+            checked.add(observation)
             if path in seen:
                 raise DiscoveryError(
                     f"Duplicate skill output path {path!r} for agents "
@@ -681,6 +705,8 @@ def _check_skill_path_collisions(agents: list[AgentDefinition]) -> None:
 def _skill_path_for_harness(harness: str, agent: AgentDefinition) -> Path:
     if harness == "claude-skills":
         return claude_skill_output_path(agent)
+    if harness == "hermes-skills":
+        return hermes_skill_output_path(agent)
     return skill_output_path(agent)
 
 

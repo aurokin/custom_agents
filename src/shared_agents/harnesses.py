@@ -12,10 +12,15 @@ HARNESS_KEYWORDS: tuple[str, ...] = (
     "opencode",
     "gemini",
     "agent-skills",
+    "hermes-skills",
     "tprompt",
 )
 
-SKILL_HARNESS_KEYWORDS: tuple[str, ...] = ("claude-skills", "agent-skills")
+SKILL_HARNESS_KEYWORDS: tuple[str, ...] = (
+    "claude-skills",
+    "agent-skills",
+    "hermes-skills",
+)
 
 
 def _always_available() -> bool:
@@ -38,6 +43,7 @@ AVAILABILITY_PROBES: dict[str, Callable[[], bool]] = {
     "opencode": _always_available,
     "gemini": _always_available,
     "agent-skills": _always_available,
+    "hermes-skills": _always_available,
     "tprompt": _tprompt_available,
 }
 

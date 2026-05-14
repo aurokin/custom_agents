@@ -60,7 +60,7 @@ repeated; the values accumulate.
 |------|--------|
 | `--agents A,B` | Only operate on the listed agents. |
 | `--exclude-agents A,B` | Skip the listed agents. |
-| `--harness H,...` | Only operate on the listed harnesses. Keywords: `claude`, `claude-skills`, `codex`, `copilot`, `cursor`, `gemini`, `agent-skills`, `tprompt`. |
+| `--harness H,...` | Only operate on the listed harnesses. Keywords: `claude`, `claude-skills`, `codex`, `copilot`, `cursor`, `opencode`, `gemini`, `agent-skills`, `hermes-skills`, `tprompt`. |
 | `--exclude-harness H,...` | Skip the listed harnesses. |
 | `--no-tprompt` | Exclude tprompt entirely. On `sync` this means don't write tprompt outputs; on `clean` it means leave existing tprompt entries in place. |
 
@@ -71,6 +71,7 @@ shared-agents sync --agents code-reviewer       # one agent, all harnesses
 shared-agents sync --harness claude,codex       # all agents, two harnesses
 shared-agents sync --harness claude-skills      # only Claude Skills bundles
 shared-agents sync --harness agent-skills       # only neutral Agent Skills bundles
+shared-agents sync --harness hermes-skills      # install skills for Hermes
 shared-agents sync --exclude-harness gemini     # skip gemini for everyone
 shared-agents sync --agents code-reviewer --harness claude
 shared-agents clean --agents code-reviewer      # remove only this agent's outputs
@@ -160,21 +161,24 @@ Scoped operations only touch the in-scope subset of the manifest:
 - Gemini CLI: `~/.gemini/agents/<name>.md`
 - Claude Skills bundle: `~/.claude/skills/<skill-name>/SKILL.md`
 - Agent Skills neutral bundle: `~/.agents/skills/<skill-name>/SKILL.md`
+- Hermes Skills install bundle: `$HERMES_HOME/skills/<skill-name>/SKILL.md` or `~/.hermes/skills/<skill-name>/SKILL.md`
 - Optional compatibility link: `<source-root>/agents` symlinked to `~/.agents/agents` only when `--link-canonical` is used
 
 `claude-skills` is the Claude-native skill target. `agent-skills` is the
-neutral skill target for Agent Skills-compatible consumers. The other
-supported harnesses continue to use native agent exports. Additional
-provider-specific skill install paths can be added later without changing
-the source schema.
+neutral skill target for Agent Skills-compatible consumers. `hermes-skills`
+installs the same generated `SKILL.md` bundle into Hermes' user skill
+directory. Hermes does not load `~/.agents/skills` by default; use
+`hermes-skills` for direct availability in a new Hermes session, or configure
+Hermes `skills.external_dirs` yourself to scan neutral exports. The other
+supported harnesses continue to use native agent exports.
 
 ## Manifest
 
 State is tracked in `~/.local/state/custom_agents/.shared-agents-manifest.json`
 (or `$XDG_STATE_HOME/custom_agents/...`). Cleanup is manifest-based so the
 tool only removes files it owns. The manifest is v2: each entry is
-`{agent, path}` per harness, including generated `claude-skills` and
-`agent-skills` `SKILL.md` files. Skill cleanup removes only manifest-owned
+`{agent, path}` per harness, including generated `claude-skills`,
+`agent-skills`, and `hermes-skills` `SKILL.md` files. Skill cleanup removes only manifest-owned
 files and prunes empty generated skill directories; unmanaged files in a
 skill directory are preserved. v1 manifests are auto-migrated on first load with a one-time stderr line of the form
 `note: upgrading manifest at <path> from v1 to v2`.
@@ -212,6 +216,11 @@ skill directory are preserved. v1 manifests are auto-migrated on first load with
   and other sandboxes leave `readonly` unset. Cursor-specific Skills and
   Cursor Rules are not in scope here; use the neutral `agent-skills` export
   when a reusable skill bundle is desired.
+- Hermes skill output is generated under `$HERMES_HOME/skills/` when
+  `HERMES_HOME` is set, otherwise under `~/.hermes/skills/`. Start a fresh
+  Hermes session or run `/reset` after syncing so Hermes refreshes its skill
+  index and prompt context. Cleanup is manifest-scoped and will not remove
+  hand-authored files in generated Hermes skill directories.
 - Source root resolution order is: `--source-root`, current working directory
   when it contains `agents/`, `AGENTS_HOME`, then legacy fallback `~/.agents`.
 - The canonical `~/.agents/agents` linker is opt-in via `--link-canonical`.

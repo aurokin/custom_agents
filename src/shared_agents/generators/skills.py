@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,13 @@ def resolve_claude_skills_dir() -> Path:
     return Path.home() / ".claude" / "skills"
 
 
+def resolve_hermes_skills_dir() -> Path:
+    configured = os.environ.get("HERMES_HOME")
+    if configured:
+        return Path(configured).expanduser() / "skills"
+    return Path.home() / ".hermes" / "skills"
+
+
 def skill_name(agent: AgentDefinition) -> str:
     return normalize_skill_name(agent.skill.name or agent.name)
 
@@ -31,11 +39,18 @@ def claude_skill_output_path(agent: AgentDefinition) -> Path:
     return resolve_claude_skills_dir() / name / "SKILL.md"
 
 
+def hermes_skill_output_path(agent: AgentDefinition) -> Path:
+    name = skill_name(agent)
+    return resolve_hermes_skills_dir() / name / "SKILL.md"
+
+
 def _default_title(name: str) -> str:
     return " ".join(part[:1].upper() + part[1:] for part in name.split("-"))
 
 
-def build_skill_frontmatter(agent: AgentDefinition) -> dict[str, Any]:
+def build_skill_frontmatter(
+    agent: AgentDefinition, *, include_hermes_metadata: bool = False
+) -> dict[str, Any]:
     name = skill_name(agent)
     description = agent.skill.description or agent.description
     frontmatter: dict[str, Any] = {
@@ -53,12 +68,21 @@ def build_skill_frontmatter(agent: AgentDefinition) -> dict[str, Any]:
         "original_name": agent.name,
     }
     metadata.update(agent.skill.metadata)
+    if include_hermes_metadata:
+        metadata["hermes"] = {
+            "generated_by": "custom_agents",
+            "source_agent": agent.name,
+        }
     frontmatter["metadata"] = metadata
     return frontmatter
 
 
-def render_skill(agent: AgentDefinition) -> str:
-    frontmatter = build_skill_frontmatter(agent)
+def render_skill(
+    agent: AgentDefinition, *, include_hermes_metadata: bool = False
+) -> str:
+    frontmatter = build_skill_frontmatter(
+        agent, include_hermes_metadata=include_hermes_metadata
+    )
     yaml_block = yaml.safe_dump(
         frontmatter,
         sort_keys=False,
@@ -87,4 +111,11 @@ def write_agent_skill(
     output_path: Path, agent: AgentDefinition, dry_run: bool = False
 ) -> str:
     content = render_skill(agent)
+    return write_atomic_if_changed(output_path, content, dry_run=dry_run)
+
+
+def write_hermes_skill(
+    output_path: Path, agent: AgentDefinition, dry_run: bool = False
+) -> str:
+    content = render_skill(agent, include_hermes_metadata=True)
     return write_atomic_if_changed(output_path, content, dry_run=dry_run)

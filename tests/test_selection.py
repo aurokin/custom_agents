@@ -47,6 +47,36 @@ def test_resolve_selection_skill_export_returns_only_skill_harness(
     assert selections[0].harnesses == frozenset({"claude-skills", "agent-skills"})
 
 
+def test_resolve_selection_hermes_skills_is_opt_in(
+    agents_home: Path,
+) -> None:
+    _make_agent(agents_home, "alpha", "export: skill\n")
+    agents = discover_agents(agents_home)
+
+    selections = resolve_selection(
+        agents,
+        CLIFilters(include_harness=frozenset({"hermes-skills"})),
+        _all_harnesses(),
+    )
+
+    assert selections[0].harnesses == frozenset({"hermes-skills"})
+
+
+def test_resolve_selection_agent_can_include_hermes_skills(
+    agents_home: Path,
+) -> None:
+    _make_agent(
+        agents_home,
+        "alpha",
+        "export: skill\nharness:\n  include: [hermes-skills]\n",
+    )
+    agents = discover_agents(agents_home)
+
+    selections = resolve_selection(agents, CLIFilters(), _all_harnesses())
+
+    assert selections[0].harnesses == frozenset({"hermes-skills"})
+
+
 def test_resolve_selection_none_export_returns_no_harnesses(
     agents_home: Path,
 ) -> None:
@@ -262,7 +292,7 @@ def test_resolve_selection_rejects_unknown_harness_keyword(
     with pytest.raises(ValueError, match="Unknown harness keyword"):
         resolve_selection(
             agents,
-            CLIFilters(include_harness=frozenset({"hermes"})),
+            CLIFilters(include_harness=frozenset({"llama"})),
             _all_harnesses(),
         )
 
@@ -274,7 +304,7 @@ def test_resolve_selection_rejects_unknown_harness_in_available(
     agents = discover_agents(agents_home)
 
     with pytest.raises(ValueError, match="Unknown harness keyword"):
-        resolve_selection(agents, CLIFilters(), ("hermes",))
+        resolve_selection(agents, CLIFilters(), ("llama",))
 
 
 def test_resolve_selection_schema_exclude_drops_into_empty_set(
