@@ -376,6 +376,21 @@ def test_schema_cursor_block_parses(agents_home: Path) -> None:
     assert agent.cursor.readonly is False
     assert agent.cursor.description == "Cursor-specific frontend reviewer blurb"
     assert agent.resolved_cursor_readonly() is False
+    assert agent.opencode.model == "opencode/gpt-5.1-codex"
+    assert agent.opencode.variant == "reasoning"
+    assert agent.opencode.temperature == 0.1
+    assert agent.opencode.top_p == 0.9
+    assert agent.opencode.disable is True
+    assert agent.opencode.mode == "subagent"
+    assert agent.opencode.hidden is True
+    assert agent.opencode.color == "accent"
+    assert agent.opencode.steps == 8
+    assert agent.opencode.description == "OpenCode-specific frontend reviewer blurb"
+    assert agent.opencode.permission == {
+        "edit": "ask",
+        "bash": {"*": "ask", "git diff*": "allow"},
+    }
+    assert agent.opencode.options == {"reasoningEffort": "high"}
 
 
 def test_schema_cursor_readonly_derives_from_sandbox(agents_home: Path) -> None:
@@ -441,6 +456,110 @@ def test_schema_cursor_rejects_non_bool_readonly(agents_home: Path) -> None:
     )
 
     with pytest.raises(SchemaError, match="readonly"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_opencode_defaults_to_subagent(agents_home: Path) -> None:
+    source_dir = install_fixture(agents_home, "minimal-agent")
+
+    agent = load_agent_definition(source_dir)
+
+    assert agent.opencode.model is None
+    assert agent.opencode.mode is None
+    assert agent.resolved_opencode_mode() == "subagent"
+    assert agent.resolved_opencode_permission() == {"edit": "deny", "bash": "deny"}
+
+
+def test_schema_opencode_rejects_unknown_keys(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "bad-opencode",
+        "\n".join(
+            [
+                "name: bad-opencode",
+                "description: Invalid opencode config",
+                "opencode:",
+                "  unsupported: true",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="Unknown opencode keys"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_opencode_rejects_invalid_mode(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "bad-opencode-mode",
+        "\n".join(
+            [
+                "name: bad-opencode-mode",
+                "description: Invalid opencode mode",
+                "opencode:",
+                "  mode: readonly",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="Invalid opencode.mode"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_opencode_rejects_invalid_tools(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "bad-opencode-tools",
+        "\n".join(
+            [
+                "name: bad-opencode-tools",
+                "description: Invalid opencode tools",
+                "opencode:",
+                "  tools:",
+                "    edit: deny",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="tools"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_opencode_options_reject_reserved_keys(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "bad-opencode-options",
+        "\n".join(
+            [
+                "name: bad-opencode-options",
+                "description: Invalid opencode options",
+                "opencode:",
+                "  options:",
+                "    permission: {}",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="opencode.options.*permission"):
+        load_agent_definition(source_dir)
+
+
+def test_schema_opencode_options_reject_disable(agents_home: Path) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "bad-opencode-options-disable",
+        "\n".join(
+            [
+                "name: bad-opencode-options-disable",
+                "description: Invalid opencode options disable",
+                "opencode:",
+                "  options:",
+                "    disable: true",
+            ]
+        ),
+    )
+
+    with pytest.raises(SchemaError, match="opencode.options.*disable"):
         load_agent_definition(source_dir)
 
 

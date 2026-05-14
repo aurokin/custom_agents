@@ -19,6 +19,7 @@ from .generators.copilot import write_copilot_agent
 from .generators.codex import write_codex_agent
 from .generators.cursor import write_cursor_agent
 from .generators.gemini import write_gemini_agent
+from .generators.opencode import write_opencode_agent
 from .generators.skills import (
     claude_skill_output_path,
     resolve_agent_skills_dir,
@@ -66,6 +67,10 @@ def _cursor_path(agent: AgentDefinition) -> Path:
     return Path.home() / ".cursor" / "agents" / f"{agent.output_name}.md"
 
 
+def _opencode_path(agent: AgentDefinition) -> Path:
+    return Path.home() / ".config" / "opencode" / "agents" / f"{agent.output_name}.md"
+
+
 def _gemini_path(agent: AgentDefinition) -> Path:
     return Path.home() / ".gemini" / "agents" / f"{agent.output_name}.md"
 
@@ -85,6 +90,7 @@ def _always_on_writers() -> dict[str, HarnessWriter]:
         "copilot": HarnessWriter(path=_copilot_path, write=write_copilot_agent),
         "codex": HarnessWriter(path=_codex_path, write=write_codex_agent),
         "cursor": HarnessWriter(path=_cursor_path, write=write_cursor_agent),
+        "opencode": HarnessWriter(path=_opencode_path, write=write_opencode_agent),
         "gemini": HarnessWriter(path=_gemini_path, write=write_gemini_agent),
         "agent-skills": HarnessWriter(path=_agent_skill_path, write=write_agent_skill),
     }

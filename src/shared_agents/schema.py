@@ -35,6 +35,24 @@ DEFAULT_CODEX_REASONING_EFFORT = "high"
 DEFAULT_COPILOT_MODEL = "gpt-5.5-high"
 COPILOT_GITHUB_TARGET = "github-copilot"
 COPILOT_VSCODE_TARGET = "vscode"
+OPENCODE_RESERVED_OPTION_KEYS = {
+    "color",
+    "description",
+    "disable",
+    "hidden",
+    "maxSteps",
+    "mode",
+    "model",
+    "name",
+    "options",
+    "permission",
+    "prompt",
+    "steps",
+    "temperature",
+    "tools",
+    "top_p",
+    "variant",
+}
 
 
 class SchemaError(ValueError):
@@ -112,6 +130,23 @@ class CursorConfig:
 
 
 @dataclass(frozen=True)
+class OpenCodeConfig:
+    model: str | None = None
+    variant: str | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    disable: bool | None = None
+    mode: str | None = None
+    hidden: bool | None = None
+    color: str | None = None
+    steps: int | None = None
+    description: str | None = None
+    permission: dict[str, Any] | None = None
+    tools: dict[str, bool] | None = None
+    options: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class HarnessConfig:
     include: list[str] | None = None
     exclude: list[str] | None = None
@@ -154,6 +189,7 @@ class AgentDefinition:
     codex: CodexConfig
     copilot: CopilotConfig
     cursor: CursorConfig
+    opencode: OpenCodeConfig
     gemini: GeminiConfig
     tprompt: TpromptConfig
     harness: HarnessConfig
@@ -165,6 +201,17 @@ class AgentDefinition:
         if self.sandbox == "read-only":
             return True
         return None
+
+    def resolved_opencode_mode(self) -> str:
+        return self.opencode.mode or "subagent"
+
+    def resolved_opencode_permission(self) -> dict[str, Any] | None:
+        permission: dict[str, Any] = {}
+        if self.sandbox == "read-only":
+            permission.update({"edit": "deny", "bash": "deny"})
+        if self.opencode.permission:
+            permission.update(self.opencode.permission)
+        return permission or None
 
     @property
     def output_name(self) -> str:
@@ -392,6 +439,47 @@ def load_agent_definition(
         description=_optional_str(cursor_raw, "description", agent_yaml_path),
     )
 
+    opencode_raw = _optional_mapping(raw, "opencode", agent_yaml_path)
+    opencode_unknown = set(opencode_raw) - {
+        "model",
+        "variant",
+        "temperature",
+        "top_p",
+        "disable",
+        "mode",
+        "hidden",
+        "color",
+        "steps",
+        "description",
+        "permission",
+        "tools",
+        "options",
+    }
+    if opencode_unknown:
+        unknown_keys = ", ".join(sorted(opencode_unknown))
+        raise SchemaError(
+            f"Unknown opencode keys in {agent_yaml_path}: {unknown_keys}. "
+            "Use opencode.options for additional provider-specific fields."
+        )
+    opencode = OpenCodeConfig(
+        model=_optional_str(opencode_raw, "model", agent_yaml_path),
+        variant=_optional_str(opencode_raw, "variant", agent_yaml_path),
+        temperature=_optional_number(opencode_raw, "temperature", agent_yaml_path),
+        top_p=_optional_number(opencode_raw, "top_p", agent_yaml_path),
+        disable=_optional_bool(opencode_raw, "disable", agent_yaml_path),
+        mode=_optional_str(opencode_raw, "mode", agent_yaml_path),
+        hidden=_optional_bool(opencode_raw, "hidden", agent_yaml_path),
+        color=_optional_str(opencode_raw, "color", agent_yaml_path),
+        steps=_optional_int(opencode_raw, "steps", agent_yaml_path),
+        description=_optional_str(opencode_raw, "description", agent_yaml_path),
+        permission=_optional_mapping_or_none(
+            opencode_raw, "permission", agent_yaml_path
+        ),
+        tools=_optional_bool_mapping(opencode_raw, "tools", agent_yaml_path),
+        options=_optional_mapping(opencode_raw, "options", agent_yaml_path),
+    )
+    _validate_opencode_config(opencode, agent_yaml_path)
+
     tprompt_enabled = "tprompt" in raw
     tprompt_raw = _optional_mapping(raw, "tprompt", agent_yaml_path)
     tprompt_unknown = set(tprompt_raw) - {
@@ -462,6 +550,7 @@ def load_agent_definition(
         "codex",
         "copilot",
         "cursor",
+        "opencode",
         "gemini",
         "tprompt",
         "harness",
@@ -484,6 +573,7 @@ def load_agent_definition(
         codex=codex,
         copilot=copilot,
         cursor=cursor,
+        opencode=opencode,
         gemini=gemini,
         tprompt=tprompt,
         harness=harness,
@@ -601,6 +691,32 @@ def _optional_mapping(
     if not isinstance(value, dict):
         raise SchemaError(f"Expected {key!r} to be a mapping in {path}")
     return dict(value)
+
+
+def _optional_mapping_or_none(
+    data: dict[str, Any], key: str, path: Path
+) -> dict[str, Any] | None:
+    if key not in data or data[key] is None:
+        return None
+    return _optional_mapping(data, key, path)
+
+
+def _optional_bool_mapping(
+    data: dict[str, Any], key: str, path: Path
+) -> dict[str, bool] | None:
+    value = _optional_mapping_or_none(data, key, path)
+    if value is None:
+        return None
+    for item_key, item_value in value.items():
+        if not isinstance(item_key, str) or not item_key.strip():
+            raise SchemaError(
+                f"Expected every {key!r} key to be a non-empty string in {path}"
+            )
+        if not isinstance(item_value, bool):
+            raise SchemaError(
+                f"Expected every {key!r} value to be a boolean in {path}"
+            )
+    return value
 
 
 def _optional_str(data: dict[str, Any], key: str, path: Path) -> str | None:
@@ -999,3 +1115,40 @@ def _validate_gemini_config(config: GeminiConfig, path: Path) -> None:
             raise SchemaError(
                 f"Invalid gemini.{field_name} in {path}: {value!r}"
             )
+
+
+def _validate_opencode_config(config: OpenCodeConfig, path: Path) -> None:
+    if config.mode and config.mode not in {"primary", "subagent", "all"}:
+        raise SchemaError(
+            f"Invalid opencode.mode in {path}: {config.mode!r} "
+            "(allowed: primary, subagent, all)"
+        )
+    if config.temperature is not None and not 0 <= config.temperature <= 1:
+        raise SchemaError(
+            f"Invalid opencode.temperature in {path}: {config.temperature!r}"
+        )
+    if config.top_p is not None and not 0 <= config.top_p <= 1:
+        raise SchemaError(f"Invalid opencode.top_p in {path}: {config.top_p!r}")
+    if config.steps is not None and config.steps <= 0:
+        raise SchemaError(f"Invalid opencode.steps in {path}: {config.steps!r}")
+    if config.color is not None:
+        theme_colors = {
+            "primary",
+            "secondary",
+            "accent",
+            "success",
+            "warning",
+            "error",
+            "info",
+        }
+        hex_color = re.fullmatch(r"#[0-9a-fA-F]{6}", config.color)
+        if not hex_color and config.color not in theme_colors:
+            raise SchemaError(f"Invalid opencode.color in {path}: {config.color!r}")
+    if config.permission is not None and not isinstance(config.permission, dict):
+        raise SchemaError(f"opencode.permission must be a mapping in {path}")
+    option_conflicts = OPENCODE_RESERVED_OPTION_KEYS & set(config.options)
+    if option_conflicts:
+        keys = ", ".join(sorted(option_conflicts))
+        raise SchemaError(
+            f"opencode.options in {path} contains fields handled elsewhere: {keys}"
+        )

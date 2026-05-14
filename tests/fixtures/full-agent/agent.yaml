@@ -51,6 +51,24 @@ cursor:
   model: gpt-5.4-cursor
   readonly: false
   description: Cursor-specific frontend reviewer blurb
+opencode:
+  model: opencode/gpt-5.1-codex
+  variant: reasoning
+  temperature: 0.1
+  top_p: 0.9
+  disable: true
+  mode: subagent
+  hidden: true
+  color: accent
+  steps: 8
+  description: OpenCode-specific frontend reviewer blurb
+  permission:
+    edit: ask
+    bash:
+      "*": ask
+      "git diff*": allow
+  options:
+    reasoningEffort: high
 gemini:
   tools:
     - read_file

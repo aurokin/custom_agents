@@ -12,6 +12,7 @@ def test_harness_keywords_contents() -> None:
         "codex",
         "copilot",
         "cursor",
+        "opencode",
         "gemini",
         "agent-skills",
         "tprompt",
@@ -31,6 +32,7 @@ def test_available_harnesses_includes_always_on(
         "codex",
         "copilot",
         "cursor",
+        "opencode",
         "gemini",
         "agent-skills",
     )

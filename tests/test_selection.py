@@ -29,7 +29,9 @@ def test_resolve_selection_default_returns_all(agents_home: Path) -> None:
     selections = resolve_selection(agents, CLIFilters(), _all_harnesses())
 
     assert [s.agent.name for s in selections] == ["alpha", "beta"]
-    expected = frozenset({"claude", "codex", "copilot", "cursor", "gemini"})
+    expected = frozenset(
+        {"claude", "codex", "copilot", "cursor", "opencode", "gemini"}
+    )
     for selection in selections:
         assert selection.harnesses == expected
 
@@ -281,7 +283,7 @@ def test_resolve_selection_schema_exclude_drops_into_empty_set(
     _make_agent(
         agents_home,
         "alpha",
-        "harness:\n  exclude: [claude, codex, copilot, cursor, gemini]\n",
+        "harness:\n  exclude: [claude, codex, copilot, cursor, opencode, gemini]\n",
     )
     agents = discover_agents(agents_home)
 

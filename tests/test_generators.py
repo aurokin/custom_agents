@@ -14,6 +14,10 @@ from shared_agents.generators.copilot import build_copilot_frontmatter, render_c
 from shared_agents.generators.codex import build_codex_document, render_codex_agent
 from shared_agents.generators.cursor import build_cursor_frontmatter, render_cursor_agent
 from shared_agents.generators.gemini import build_gemini_frontmatter, render_gemini_agent
+from shared_agents.generators.opencode import (
+    build_opencode_frontmatter,
+    render_opencode_agent,
+)
 from shared_agents.generators.skills import (
     build_skill_frontmatter,
     normalize_skill_name,
@@ -466,6 +470,79 @@ def test_cursor_generator_minimal_emits_derived_readonly(agents_home: Path) -> N
     assert "focused code reviewer" in rendered
 
 
+def test_opencode_generator_minimal_emits_subagent_and_readonly_permissions(
+    agents_home: Path,
+) -> None:
+    agent = load_agent_definition(install_fixture(agents_home, "minimal-agent"))
+
+    rendered = render_opencode_agent(agent)
+    frontmatter = _parse_frontmatter(rendered)
+
+    assert frontmatter == {
+        "description": "Reviews code for correctness and risk.",
+        "mode": "subagent",
+        "permission": {
+            "edit": "deny",
+            "bash": "deny",
+        },
+    }
+    assert "focused code reviewer" in rendered
+
+
+def test_opencode_generator_full(agents_home: Path) -> None:
+    agent = load_agent_definition(install_fixture(agents_home, "full-agent"))
+
+    rendered = render_opencode_agent(agent)
+    frontmatter = _parse_frontmatter(rendered)
+
+    assert frontmatter == {
+        "description": "OpenCode-specific frontend reviewer blurb",
+        "mode": "subagent",
+        "model": "opencode/gpt-5.1-codex",
+        "variant": "reasoning",
+        "temperature": 0.1,
+        "top_p": 0.9,
+        "disable": True,
+        "hidden": True,
+        "color": "accent",
+        "steps": 8,
+        "permission": {
+            "edit": "ask",
+            "bash": {
+                "*": "ask",
+                "git diff*": "allow",
+            },
+        },
+        "reasoningEffort": "high",
+    }
+
+
+def test_opencode_generator_workspace_write_omits_permissions(
+    agents_home: Path,
+) -> None:
+    source_dir = write_agent(
+        agents_home,
+        "opencode-workspace-write",
+        "\n".join(
+            [
+                "name: workspace-opencode",
+                "description: Workspace-write agent",
+                "defaults:",
+                "  sandbox: workspace-write",
+            ]
+        ),
+    )
+
+    frontmatter = _parse_frontmatter(
+        render_opencode_agent(load_agent_definition(source_dir))
+    )
+
+    assert frontmatter == {
+        "description": "Workspace-write agent",
+        "mode": "subagent",
+    }
+
+
 def test_cursor_generator_full(agents_home: Path) -> None:
     agent = load_agent_definition(install_fixture(agents_home, "full-agent"))
 
@@ -508,6 +585,14 @@ def test_cursor_generator_roundtrip(agents_home: Path) -> None:
 
     assert build_cursor_frontmatter(agent) == _parse_frontmatter(
         render_cursor_agent(agent)
+    )
+
+
+def test_opencode_generator_roundtrip(agents_home: Path) -> None:
+    agent = load_agent_definition(install_fixture(agents_home, "full-agent"))
+
+    assert build_opencode_frontmatter(agent) == _parse_frontmatter(
+        render_opencode_agent(agent)
     )
 
 
@@ -586,6 +671,7 @@ def test_repo_retrorabbit_renders_as_floating_agent(initialized_repo: Path) -> N
     copilot_frontmatter = _parse_frontmatter(render_copilot_agent(agent))
     codex_document = tomllib.loads(render_codex_agent(agent))
     cursor_frontmatter = _parse_frontmatter(render_cursor_agent(agent))
+    opencode_frontmatter = _parse_frontmatter(render_opencode_agent(agent))
     gemini_frontmatter = _parse_frontmatter(render_gemini_agent(agent))
 
     assert "model" not in claude_frontmatter
@@ -595,6 +681,8 @@ def test_repo_retrorabbit_renders_as_floating_agent(initialized_repo: Path) -> N
     assert "model_reasoning_effort" not in codex_document
     assert "model" not in cursor_frontmatter
     assert cursor_frontmatter["readonly"] is True
+    assert "model" not in opencode_frontmatter
+    assert opencode_frontmatter["permission"] == {"edit": "deny", "bash": "deny"}
     assert gemini_frontmatter["tools"] == ["read_file", "grep_search"]
     assert gemini_frontmatter["max_turns"] == 16
     assert "model" not in gemini_frontmatter
