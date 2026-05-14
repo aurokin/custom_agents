@@ -17,6 +17,9 @@ dependencies = [
 dev = [
   "pytest>=8.0",
 ]
+tui = [
+  "questionary>=2.0",
+]
 
 [project.scripts]
 shared-agents = "shared_agents.main:main"

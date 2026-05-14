@@ -54,6 +54,13 @@ class HarnessWriter:
     write: Callable[..., str]
 
 
+@dataclass(frozen=True)
+class SyncPreview:
+    write_paths: tuple[Path, ...]
+    remove_paths: tuple[Path, ...]
+    link_messages: tuple[str, ...]
+
+
 def _claude_path(agent: AgentDefinition) -> Path:
     return Path.home() / ".claude" / "agents" / f"{agent.output_name}.md"
 
@@ -195,6 +202,13 @@ def build_parser() -> argparse.ArgumentParser:
     clean.add_argument("--source-root", "--agents-home", dest="source_root", type=Path)
     _add_selection_flags(clean)
 
+    tui = subparsers.add_parser(
+        "tui",
+        help="Interactively select agents and harnesses",
+        allow_abbrev=False,
+    )
+    tui.add_argument("--source-root", "--agents-home", dest="source_root", type=Path)
+
     init = subparsers.add_parser(
         "init",
         help="Bootstrap agent.yaml from agent.yaml.example for every agent",
@@ -229,6 +243,10 @@ def main(argv: list[str] | None = None) -> int:
                 dry_run=args.dry_run,
                 filters=_build_filters(args),
             )
+        if args.command == "tui":
+            from .tui import _cmd_tui
+
+            return _cmd_tui(source_root)
         if args.command == "init":
             return _cmd_init(source_root, dry_run=args.dry_run)
     except DiscoveryError as exc:
@@ -360,6 +378,88 @@ def _cmd_sync(
 
     print(_format_sync_summary(counters, removed, link_summary, list(writers.keys())))
     return 0
+
+
+def build_sync_preview(
+    source_root: Path,
+    filters: CLIFilters | None = None,
+) -> SyncPreview:
+    filters = filters or CLIFilters()
+    agents = discover_agents(source_root, materialize=False)
+    _check_tprompt_path_collisions(agents)
+    _check_skill_path_collisions(agents, filters)
+    manifest = load_manifest(source_root)
+    desired = _empty_desired()
+    write_paths: list[Path] = []
+
+    writers = _always_on_writers()
+    selections = resolve_selection(agents, filters, available_harnesses())
+    for selection in selections:
+        for harness, writer in writers.items():
+            if harness not in selection.harnesses:
+                continue
+            path = writer.path(selection.agent)
+            status = writer.write(path, selection.agent, dry_run=True)
+            if status != "unchanged":
+                write_paths.append(path)
+            desired[harness].append(
+                ManifestEntry(agent=selection.agent.name, path=str(path))
+            )
+
+    tprompt_bin = tprompt_executable()
+    tprompt_selections = resolve_selection(agents, filters, HARNESS_KEYWORDS)
+    for selection in tprompt_selections:
+        agent = selection.agent
+        if not agent.tprompt.enabled:
+            continue
+        tprompt_path = tprompt_output_path(agent)
+        if "tprompt" not in selection.harnesses:
+            if agent.export != "agent":
+                continue
+        elif tprompt_bin is None:
+            pass
+        else:
+            status = write_tprompt_agent(
+                tprompt_path, agent, executable=tprompt_bin, dry_run=True
+            )
+            if status != "unchanged":
+                write_paths.append(tprompt_path)
+            desired["tprompt"].append(
+                ManifestEntry(agent=agent.name, path=str(tprompt_path))
+            )
+            continue
+        if tprompt_path.exists():
+            desired["tprompt"].append(
+                ManifestEntry(agent=agent.name, path=str(tprompt_path))
+            )
+
+    scope = (
+        _build_scope(filters, {agent.name for agent in agents})
+        if filters.is_active()
+        else None
+    )
+    return SyncPreview(
+        write_paths=tuple(write_paths),
+        remove_paths=tuple(
+            path
+            for path, _consumer in _stale_generated_paths(
+                manifest, desired, scope=scope
+            )
+        ),
+        link_messages=tuple(_preview_link_messages(manifest)),
+    )
+
+
+def _preview_link_messages(manifest: Manifest) -> list[str]:
+    _link_summary, link_messages = prune_stale_links(
+        manifest.linked_targets,
+        dry_run=True,
+    )
+    return [
+        message
+        for message in link_messages
+        if message.startswith("remove managed") or message.startswith("warn")
+    ]
 
 
 def _format_sync_summary(
@@ -635,7 +735,29 @@ def _remove_stale_generated_files(
     dry_run: bool,
     remove_all: bool = False,
 ) -> int:
-    removed = 0
+    paths = _stale_generated_paths(
+        manifest,
+        desired,
+        scope=scope,
+        remove_all=remove_all,
+    )
+    for path, consumer in paths:
+        if not dry_run:
+            path.unlink()
+            _prune_empty_generated_parent(path, consumer)
+        print(f"remove generated {path}")
+    return len(paths)
+
+
+def _stale_generated_paths(
+    manifest: Manifest,
+    desired: dict[str, list[ManifestEntry]],
+    *,
+    scope: _Scope | None = None,
+    remove_all: bool = False,
+) -> list[tuple[Path, str]]:
+    paths: list[tuple[Path, str]] = []
+    seen_paths: set[str] = set()
     for consumer, entries in manifest.generated_files.items():
         desired_paths = {entry.path for entry in desired.get(consumer, [])}
         for entry in entries:
@@ -645,12 +767,11 @@ def _remove_stale_generated_files(
                 continue
             path = Path(entry.path)
             if path.exists() or path.is_symlink():
-                if not dry_run:
-                    path.unlink()
-                    _prune_empty_generated_parent(path, consumer)
-                removed += 1
-                print(f"remove generated {path}")
-    return removed
+                if entry.path in seen_paths:
+                    continue
+                seen_paths.add(entry.path)
+                paths.append((path, consumer))
+    return paths
 
 
 def _prune_empty_generated_parent(path: Path, consumer: str) -> None:

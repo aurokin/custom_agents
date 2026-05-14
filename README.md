@@ -46,10 +46,26 @@ The repository currently ships these canonical shared agents:
 shared-agents init                              # explicitly materialize agent.yaml from .example (also auto-run by the others)
 shared-agents sync                              # all agents × all available harnesses
 shared-agents sync --link-canonical
+shared-agents tui                               # interactive agent + harness selection
 shared-agents list
 shared-agents validate
 shared-agents clean
 ```
+
+### Interactive TUI
+
+Install the optional TUI extra before using the interactive selector:
+
+```bash
+python3 -m pip install -e '.[tui]'
+shared-agents tui
+```
+
+The TUI presents separate multi-select prompts for agents and harnesses, then
+shows a dry-run preview of files that will be written or removed before asking
+for confirmation. `q`, Esc, empty selections, or declining confirmation abort
+without writing generated files. The TUI is only launched by the explicit
+`tui` subcommand; `sync` remains scriptable and never auto-launches it.
 
 ### Selection flags (on `sync`, `list`, `clean`)
 

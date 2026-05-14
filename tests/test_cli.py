@@ -280,6 +280,35 @@ def test_clean_removes_manifest_owned_files(agents_home: Path, fake_home: Path) 
     assert load_manifest(agents_home) == load_manifest(agents_home).empty()
 
 
+def test_clean_tolerates_duplicate_manifest_entries(
+    agents_home: Path, fake_home: Path
+) -> None:
+    target = fake_home / ".claude" / "agents" / "duplicate.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("generated\n", encoding="utf-8")
+    primary = manifest_path(agents_home)
+    primary.parent.mkdir(parents=True)
+    primary.write_text(
+        json.dumps(
+            {
+                "version": MANIFEST_VERSION,
+                "generated_files": {
+                    "claude": [
+                        {"agent": "duplicate", "path": str(target)},
+                        {"agent": "duplicate", "path": str(target)},
+                    ],
+                },
+                "linked_targets": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["clean", "--source-root", str(agents_home)]) == 0
+
+    assert not target.exists()
+
+
 def test_sync_and_clean_support_legacy_manifest_without_gemini_key(
     agents_home: Path, fake_home: Path
 ) -> None:
